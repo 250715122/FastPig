@@ -1,0 +1,6 @@
+∈hivexwb:hive行为表∈
+select * from user_action_record where from_unixtime(cast(substr(create_time,1,10) as int),'yyyy-MM-dd') = date_sub(from_unixtime(unix_timestamp(),'yyyy-MM-dd'),1) limit 100;
+
+∈hivebgb:hive曝光表∈
+select * from user_exposure_record where from_unixtime(cast(substr(create_time,1,10) as int),'yyyy-MM-dd') = date_sub(from_unixtime(unix_timestamp(),'yyyy-MM-dd'),1) limit 100;
+

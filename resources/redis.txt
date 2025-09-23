@@ -1,0 +1,7 @@
+∈redis:redis相关∈
+获取分布式锁
+get JedisLock_TOUTIAOJOB
+get JedisLock_AD_CHANNEL_HISTORY_HOUR_JOB_LOCK
+
+lpush "USER_OPERATION_QUEUE" "{\"userID\":\"15895323232\",\"deviceID\":\"111ddfcf-5929-3003-a776-3d5b56adfd8c\",\"time\":1536804886724,\"ip\":\"119.137.54.206\",\"productID\":\"25\",\"operationType\":2}"
+

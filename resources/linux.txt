@@ -1,0 +1,29 @@
+∈linuxlmysql:linux连接mysql数据库∈
+
+惠拍
+mysql -h 10.66.154.43 -P 3306 -u hpyp -p hpyp-ad
+8diU6jwqH1vrEg1n
+
+90秒
+mysql -h rm-wz9as2h858svm6xd8.mysql.rds.aliyuncs.com -P 3306 -u nesecond -p nintybid-ad
+WTCcY4Jjpnx4gK9T
+
+闪拍
+mysql -h rm-wz980pisxuvl0po6j.mysql.rds.aliyuncs.com -P 3306 -u gogobids -p quickbids-ad
+bvavnk92TtxAAvpw
+
+优惠798
+mysql -h rm-wz98udx1q5w34q45o.mysql.rds.aliyuncs.com -P 3306 -u ktyp -p coupon-ad
+mJBVYL70iBEctfYf
+
+source /mydata/workspace/temp/sql.sql
+
+∈linuxtop:top命令详解∈
+
+top -p 19238	再输入大写P按cpu排序，输入大写M按内存排序
+
+top -Hp 进程ID  列出进程里所有线程
+
+printf "%x\n" 28618   输出线程对应十六进制码，过滤线程ID查到对应代码
+
+jstack 28544 | grep 6fca    根据进程查找对应代码

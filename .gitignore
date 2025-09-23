@@ -1,0 +1,29 @@
+# Java编译产物
+*.class
+target/
+out/
+
+# IDE文件
+*.iml
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 日志文件
+logs/
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# Maven
+dependency-reduced-pom.xml
+
+# 临时文件
+*.tmp
+*.temp
+
+# 错误日志
+error.txt

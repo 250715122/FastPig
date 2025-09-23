@@ -1,0 +1,273 @@
+∈mysqlrq:mysql日期∈
+select UNIX_TIMESTAMP(NOW()) * 1000;	-- 当前时间戳
+select UNIX_TIMESTAMP(SUBDATE(now(),interval 1 day)) * 1000;	-- 昨天当前时间戳
+select UNIX_TIMESTAMP(SUBDATE(now(),interval 1 hour)) * 1000;	-- 前一小时时间戳
+select UNIX_TIMESTAMP(NOW()) * 1000 - (30*24*60*60*1000);	-- 过去第30天时间戳
+select CURDATE();	-- 当天日期
+select DATE_FORMAT(CURRENT_TIME(),'%Y-%m-%d %H:%i:%s');	-- 当天时分秒
+select DATE_FORMAT(DATE_SUB(CURRENT_TIME(),INTERVAL 1 HOUR),'%Y-%m-%d %H:%i:%s');	-- 当天前一小时时分秒
+select FROM_UNIXTIME(UNIX_TIMESTAMP(),'%Y-%m-%d %H:%i:%s');	-- 时间戳转时分秒  
+select unix_timestamp(CURRENT_TIME())*1000;						 -- 时分秒转时间戳
+select unix_timestamp(date_sub(CURRENT_TIME(),INTERVAL 1 day))*1000;	-- 时分秒转时间戳过去一天
+select unix_timestamp(CONCAT(date_sub(curdate(),INTERVAL 1 day),' 00:00:00'))*1000;	-- 时分秒转时间戳过去一天00点00分
+select DATE_FORMAT(NOW(),'%b %d %Y %h:%i %p');	-- 欧美时间
+
+∈mysqljb:建表∈
+CREATE TABLE `tb_bid_order` (
+  `id` varchar(64) NOT NULL COMMENT '拍中订单ID',
+  `pay_btn_time` bigint(20) DEFAULT '0' COMMENT '首调立即支付按钮时间',
+  `pay_id` varchar(64) NOT NULL COMMENT '订单支付ID',
+  `pay_os` varchar(16) DEFAULT NULL COMMENT '支付系统类型, ios, android, wxmini',
+  `pay_channel` tinyint(4) DEFAULT NULL COMMENT '支付渠道, 1微信，2支付宝，3京东，4微信小程序',
+  `pay_time` bigint(20) NOT NULL DEFAULT '0' COMMENT '支付成功时间',
+  `sign_time` bigint(20) DEFAULT '0' COMMENT '签收时间',
+  `create_time` bigint(20) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `index_bid_order_period_id` (`bid_product_period_id`),
+  KEY `index_bid_order_pay_time` (`pay_time`),
+  KEY `index_bid_order_pay_limit_time` (`pay_limit_time`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='拍中订单信息';
+
+∈mysqlzd:增加字段∈
+alter table test add column3 varchar(20);
+
+∈mysqlsy:索引∈
+
+添加主键索引
+alter table table_test add primary key(id);
+
+添加唯一索引
+ALTER TABLE table_name ADD UNIQUE (column);
+
+添加普通索引
+ALTER TABLE table_name ADD INDEX index_name (column);
+
+添加全文索引
+ALTER TABLE table_name ADD FULLTEXT (column);
+
+创建普通索引
+CREATE INDEX index_name ON table_name (column_list);
+
+创建唯一索引
+CREATE UNIQUE INDEX index_name ON table_name (column_list);
+
+删除索引
+DROP INDEX index_name ON talbe_name;
+ALTER TABLE table_name DROP INDEX index_name;
+ALTER TABLE table_name DROP PRIMARY KEY;
+
+查看索引
+show index from tblname;
+
+
+∈mysqlcxs:查询锁∈
+
+show full processlist;
+show processlist;只列出前100条，如果想全列出请使用show full processlist;
+show open tables;
+
+这条命令能够查看当前有那些表是打开的。In_use列表示有多少线程正在使用某张表，Name_locked表示表名是否被锁，这一般发生在Drop或Rename命令操作这张表时。所以这条命令不能帮助解答我们常见的问题：当前某张表是否有死锁，谁拥有表上的这个锁等。
+e
+show open tables from database;
+
+show status like ‘%lock%’
+
+查看服务器状态。
+
+查看正在锁的事务
+SELECT * FROM INFORMATION_SCHEMA.INNODB_LOCKS; 
+
+查看等待锁的事务
+SELECT * FROM INFORMATION_SCHEMA.INNODB_LOCK_WAITS; 
+
+∈mysqlrownum:rownum自增行号∈
+SELECT *,@r:=@r+1 ranking from (
+SELECT user_id,max(nickname),sum(amount) a,count(1),CURDATE() from tb_base_order,(SELECT @r:=0) t1 where date_create=CURDATE() GROUP BY user_id ORDER BY a DESC ) t 
+on DUPLICATE key UPDATE userid=VALUES(userid),nickname=VALUES(nickname),trunover=VALUES(trunover),trading_times=VALUES(trading_times),ranking=VALUES(ranking);
+
+∈mysqlfzpx:分组排序∈
+CREATE TABLE `my_tb` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `parent_code` varchar(255) DEFAULT NULL,
+  `code` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8;
+
+INSERT INTO `my_tb` (  `parent_code`, `code`) VALUES ('01', '001');
+INSERT INTO `my_tb` (  `parent_code`, `code`) VALUES ('01', '002');
+INSERT INTO `my_tb` (  `parent_code`, `code`) VALUES ('02', '001');
+INSERT INTO `my_tb` (  `parent_code`, `code`) VALUES ('01', '003');
+INSERT INTO `my_tb` (  `parent_code`, `code`) VALUES ('02', '002');
+INSERT INTO `my_tb` (  `parent_code`, `code`) VALUES ('03', '001');
+INSERT INTO `my_tb` (  `parent_code`, `code`) VALUES ('04', '001');
+
+-- 生成 行号
+select @r:=@r+1 as row_num , a.* from  my_tb a ,(select @r:=0) b
+
+-- 生成 分组排序号
+
+select  
+     @group_row:=CASE when @parent_code=a.parent_code then  @group_row+1 else 1 end as groupRow,
+     @parent_code:=a.parent_code as parent_code,
+     a.code  
+
+  from  my_tb a ,( select @group_row:=1, @parent_code:='') as b
+ ORDER BY   a.parent_code , a.code 
+
+
+案例2
+
+create table income_tl(  
+    user_id int,  
+    create_date date,  
+    income int  
+);  
+
+insert into income_tl values(1,'2016-03-01',100);  
+insert into income_tl values(1,'2016-03-02',300);  
+insert into income_tl values(1,'2016-03-03',200);  
+insert into income_tl values(1,'2016-03-04',500);  
+insert into income_tl values(1,'2016-03-05',500);  
+  
+insert into income_tl values(2,'2016-03-01',200);  
+insert into income_tl values(2,'2016-03-02',300);  
+insert into income_tl values(2,'2016-03-03',300);  
+insert into income_tl values(2,'2016-03-04',500);  
+insert into income_tl values(2,'2016-03-05',400);  
+  
+select it.user_id,   
+       it.create_date,   
+       it.income,  
+       case  
+          when @preVal = it.user_id then @curVal := @curVal + it.income  
+          when @preVal := it.user_id then @curVal := it.income  
+       end AS sum_income  
+from income_tl it, (select @preVal:=null, @curVal:=null) r  
+order by it.user_id asc, it.create_date asc;  
+
+备注：
+1. @preVal和@curVal为用户变量，仅针对当前客户端有效；
+2. (select @preVal:=null, @curVal:=null) r 初始化@preVal和@curVal变量；
+2. 第二个when仅用作为@preVal赋值，表示条件一直为true。（mysql中‘’、0、null均为false）；
+以上即为mysql中类似分析函数（开窗函数）的使用，欢迎指正，谢谢。
+
+
+∈mysqlplcr:批量插入∈
+
+因前段时间去面试，问到如何高效向数据库插入10万条记录，之前没处理过类似问题，也没看过相关资料，结果没答上来，今天就查了些资料，总结出三种方法：
+测试数据库为mysql!!!
+方法一:
+[java] view plain copy
+public static void insert() {  
+        // 开时时间  
+        Long begin = new Date().getTime();  
+        // sql前缀  
+        String prefix = "INSERT INTO tb_big_data (count, create_time, random) VALUES ";  
+        try {  
+            // 保存sql后缀  
+            StringBuffer suffix = new StringBuffer();  
+            // 设置事务为非自动提交  
+            conn.setAutoCommit(false);  
+            // Statement st = conn.createStatement();  
+            // 比起st，pst会更好些  
+            PreparedStatement pst = conn.prepareStatement("");  
+            // 外层循环，总提交事务次数  
+            for (int i = 1; i <= 100; i++) {  
+                // 第次提交步长  
+                for (int j = 1; j <= 10000; j++) {  
+                    // 构建sql后缀  
+                    suffix.append("(" + j * i + ", SYSDATE(), " + i * j  
+                            * Math.random() + "),");  
+                }  
+                // 构建完整sql  
+                String sql = prefix + suffix.substring(0, suffix.length() - 1);  
+                // 添加执行sql  
+                pst.addBatch(sql);  
+                // 执行操作  
+                pst.executeBatch();  
+                // 提交事务  
+                conn.commit();  
+                // 清空上一次添加的数据  
+                suffix = new StringBuffer();  
+            }  
+            // 头等连接  
+            pst.close();  
+            conn.close();  
+        } catch (SQLException e) {  
+            e.printStackTrace();  
+        }  
+        // 结束时间  
+        Long end = new Date().getTime();  
+        // 耗时  
+        System.out.println("cast : " + (end - begin) / 1000 + " ms");  
+    }  
+
+输出时间：cast : 23 ms
+该方法目前测试是效率最高的方法!
+
+
+
+方法二：
+[java] view plain copy
+public static void insertRelease() {  
+        Long begin = new Date().getTime();  
+        String sql = "INSERT INTO tb_big_data (count, create_time, random) VALUES (?, SYSDATE(), ?)";  
+        try {  
+            conn.setAutoCommit(false);  
+            PreparedStatement pst = conn.prepareStatement(sql);  
+            for (int i = 1; i <= 100; i++) {  
+                for (int k = 1; k <= 10000; k++) {  
+                    pst.setLong(1, k * i);  
+                    pst.setLong(2, k * i);  
+                    pst.addBatch();  
+                }  
+                pst.executeBatch();  
+                conn.commit();  
+            }  
+            pst.close();  
+            conn.close();  
+        } catch (SQLException e) {  
+            e.printStackTrace();  
+        }  
+        Long end = new Date().getTime();  
+        System.out.println("cast : " + (end - begin) / 1000 + " ms");  
+    }  
+注：注释就没有了，和上面类同，下面会有分析！
+控制台输出：cast : 111 ms
+执行时间是上面方法的5倍！
+
+
+方法三：
+[java] view plain copy
+public static void insertBigData(SpringBatchHandler sbh) {  
+        Long begin = new Date().getTime();  
+        JdbcTemplate jdbcTemplate = sbh.getJdbcTemplate();  
+        final int count = 10000;  
+        String sql = "INSERT INTO tb_big_data (count, create_time, random) VALUES (?, SYSDATE(), ?)";  
+        jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {  
+            // 为prepared statement设置参数。这个方法将在整个过程中被调用的次数  
+            public void setValues(PreparedStatement pst, int i)  
+                    throws SQLException {  
+                pst.setLong(1, i);  
+                pst.setInt(2, i);  
+            }  
+  
+            // 返回更新的结果集条数  
+            public int getBatchSize() {  
+                return count;  
+            }  
+        });  
+        Long end = new Date().getTime();  
+        System.out.println("cast : " + (end - begin) / 1000 + " ms");  
+    }  
+
+该方法采用的是spring batchUpdate执行，因效率问题，数据量只有1万条！
+执行时间：cast : 387 ms
+
+总结：方法一和方法二很类同，唯一不同的是方法一采用的是“insert into tb (...) values(...),(...)...;”的方式执行插入操作，
+方法二则是“insert into tb (...) values (...);insert into tb (...) values (...);...”的方式，要不是测试，我也不知道两者差别是如此之大！
+当然，这个只是目前的测试，具体执行时间和步长也有很大关系！如过把步长改为100，可能方法就要几分钟了吧，这个可以自己测试哈。。。
+方法三网上很推崇，不过，效率大家也都看到了，1万条记录，耗时6分钟，可见其效率并不理想！而且方法三需要配置spring applicationContext环境才能应用！
+不过，方法三在ssh/spring-mvc中可用性还是很高的！
+
+
