@@ -142,6 +142,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         add(topBar, BorderLayout.NORTH);
         add(editor, BorderLayout.CENTER);
         centerComponent = editor;
+        ACTIVE = this;
 
         // 绑定全局快捷键：Ctrl+S -> 保存
         JRootPane root = getRootPane();
@@ -149,6 +150,41 @@ public class UnifiedNoteAppFrame extends JFrame {
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(saveKs, "saveUnified");
         root.getActionMap().put("saveUnified", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) { saveUnified(); }
+        });
+        // 程序内快捷键：Alt+P / 右Alt(AltGr)+P / Ctrl+Alt+P -> 预览/收起预览
+        KeyStroke ksAltP = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_P, java.awt.event.InputEvent.ALT_DOWN_MASK);
+        KeyStroke ksAltGrP = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_P, java.awt.event.InputEvent.ALT_GRAPH_DOWN_MASK);
+        KeyStroke ksCtrlAltP = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_P, java.awt.event.InputEvent.ALT_DOWN_MASK | java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltP, "togglePreview");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltGrP, "togglePreview");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlAltP, "togglePreview");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksAltP, "togglePreview");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksAltGrP, "togglePreview");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksCtrlAltP, "togglePreview");
+        root.getActionMap().put("togglePreview", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { toggleInAppPreview(); }
+        });
+
+        // 添加 KeyEventDispatcher 作为兜底方案，捕获所有 Alt+P 组合
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(new KeyEventDispatcher() {
+            @Override
+            public boolean dispatchKeyEvent(java.awt.event.KeyEvent e) {
+                // 只处理当前窗口的按键事件
+                if (!SwingUtilities.isDescendingFrom(e.getComponent(), UnifiedNoteAppFrame.this)) {
+                    return false;
+                }
+                
+                // 检查是否为 Alt+P 组合（按键按下事件）
+                if (e.getID() == java.awt.event.KeyEvent.KEY_PRESSED && 
+                    e.getKeyCode() == java.awt.event.KeyEvent.VK_P &&
+                    (e.isAltDown() || e.isAltGraphDown())) {
+                    
+                    System.out.println("KeyEventDispatcher 捕获到 Alt+P，触发预览切换");
+                    SwingUtilities.invokeLater(() -> toggleInAppPreview());
+                    return true; // 消费此事件
+                }
+                return false;
+            }
         });
     }
 
@@ -160,6 +196,9 @@ public class UnifiedNoteAppFrame extends JFrame {
     private JPanel actionsPanel;
     private Component centerComponent;
     private JButton previewBtnRef;
+    // 保持最近激活实例，便于全局热键调用
+    private static volatile UnifiedNoteAppFrame ACTIVE;
+    public static UnifiedNoteAppFrame getActiveInstance() { return ACTIVE; }
 
     private void toggleInAppPreview() {
         if (!previewVisible) {

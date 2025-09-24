@@ -179,6 +179,7 @@ public class HotKeyManager {
                     System.out.println("执行Alt+S: 打开编辑器");
                     openEditor();
                     break;
+                // Alt+P 不作为全局热键处理（预览仅在应用内快捷键生效）
                 default:
                     System.out.println("未处理的Alt组合键: " + NativeKeyEvent.getKeyText(e.getKeyCode()));
                     break;
@@ -206,6 +207,7 @@ public class HotKeyManager {
             case HOTKEY_EDITOR:
                 openEditor();
                 break;
+            // 预览仅在应用内快捷键处理，这里不做全局处理
         }
     }
 
@@ -218,6 +220,8 @@ public class HotKeyManager {
             System.err.println("打开编辑器失败: " + ex.getMessage());
         }
     }
+
+    // 预览切换的全局热键逻辑已移除，避免与应用内快捷键冲突
     
     /**
      * 显示窗口（正常大小）
