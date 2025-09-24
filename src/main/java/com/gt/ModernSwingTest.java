@@ -41,10 +41,14 @@ public class ModernSwingTest extends JFrame {
     public static void main(String[] args) throws IOException {
         System.out.println("启动现代化代码助手...");
         
+        // 启动统一界面
+        NoteRepository repo = new NoteRepository(System.getProperty("user.dir") + "/fastpig.db");
+        UnifiedNoteAppFrame unified = new UnifiedNoteAppFrame(repo);
+        unified.setVisible(true);
+        // 同时初始化热键（Alt+S 可再次呼出界面）
         final ModernSwingTest app = new ModernSwingTest();
         app.initializeGUI();
         app.initializeHotKeys();
-        app.setVisible(true);
     }
     
     /**
@@ -140,7 +144,7 @@ public class ModernSwingTest extends JFrame {
         
         // 在文本区域底部显示状态信息
         String currentText = textArea.getText();
-        textArea.setText(currentText + "\n\n状态：" + methodInfo);
+        textArea.setText(currentText + "\n\n状态：" + methodInfo + "\n提示：Alt+S 打开三合一编辑器");
     }
     
     /**

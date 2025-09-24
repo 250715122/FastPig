@@ -33,6 +33,7 @@ public class HotKeyManager {
     private static final int HOTKEY_SHOW_MAX = 2;
     private static final int HOTKEY_MINIMIZE = 3;
     private static final int HOTKEY_EXIT = 4;
+    private static final int HOTKEY_EDITOR = 5; // Alt+S 打开编辑器
     
     public HotKeyManager(JFrame frame, JTextArea textArea) {
         this.targetFrame = frame;
@@ -127,6 +128,7 @@ public class HotKeyManager {
             JIntellitype.getInstance().registerHotKey(HOTKEY_SHOW_MAX, JIntellitype.MOD_ALT, (int)'M');
             JIntellitype.getInstance().registerHotKey(HOTKEY_MINIMIZE, JIntellitype.MOD_ALT, (int)'L');
             JIntellitype.getInstance().registerHotKey(HOTKEY_EXIT, JIntellitype.MOD_ALT, (int)'Q');
+            JIntellitype.getInstance().registerHotKey(HOTKEY_EDITOR, JIntellitype.MOD_ALT, (int)'S');
             
             // 添加热键监听器
             JIntellitype.getInstance().addHotKeyListener(new HotkeyListener() {
@@ -173,6 +175,10 @@ public class HotKeyManager {
                     System.out.println("执行Alt+Q: 退出程序");
                     exitApplication();
                     break;
+                case NativeKeyEvent.VC_S:
+                    System.out.println("执行Alt+S: 打开编辑器");
+                    openEditor();
+                    break;
                 default:
                     System.out.println("未处理的Alt组合键: " + NativeKeyEvent.getKeyText(e.getKeyCode()));
                     break;
@@ -197,6 +203,19 @@ public class HotKeyManager {
             case HOTKEY_EXIT:
                 exitApplication();
                 break;
+            case HOTKEY_EDITOR:
+                openEditor();
+                break;
+        }
+    }
+
+    private void openEditor() {
+        try {
+            NoteRepository repo = new NoteRepository(System.getProperty("user.dir") + "/fastpig.db");
+            UnifiedNoteAppFrame frame = new UnifiedNoteAppFrame(repo);
+            frame.setVisible(true);
+        } catch (Exception ex) {
+            System.err.println("打开编辑器失败: " + ex.getMessage());
         }
     }
     
@@ -303,6 +322,7 @@ public class HotKeyManager {
         System.out.println("Alt + M: 最大化窗口");
         System.out.println("Alt + L: 最小化窗口");
         System.out.println("Alt + Q: 退出程序");
+        System.out.println("Alt + S: 打开编辑器");
         System.out.println("========================");
     }
     
@@ -315,6 +335,7 @@ public class HotKeyManager {
         System.out.println("Alt + M: 最大化窗口");
         System.out.println("Alt + L: 最小化窗口");
         System.out.println("Alt + Q: 退出程序");
+        System.out.println("Alt + S: 打开编辑器");
         System.out.println("=========================");
     }
 }
