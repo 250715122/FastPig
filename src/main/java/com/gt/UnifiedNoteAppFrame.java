@@ -23,15 +23,14 @@ import org.scilab.forge.jlatexmath.TeXIcon;
 public class UnifiedNoteAppFrame extends JFrame {
     private final NoteRepository repository;
 
-    private final JTextField queryField = new JTextField();
+    // 首行承载“快捷命令 空格 描述”，不再使用独立的输入框
     private final JPopupMenu suggestPopup = new JPopupMenu();
     private final DefaultListModel<String> suggestModel = new DefaultListModel<>();
     private final JList<String> suggestList = new JList<>(suggestModel);
     private int suggestSelectedIndex = -1;
     // 去除左侧结果列表，以输入联想替代
 
-    private final JTextField titleField = new JTextField();
-    // 去除标签编辑
+    // 去除标签与独立标题编辑，仅保留正文编辑区
     private final JTextArea bodyArea = new JTextArea();
 
     private NoteDto current;
@@ -43,12 +42,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         setSize(1100, 720);
         setLocationRelativeTo(null);
 
-        // 顶部：搜索条
-        JButton searchBtn = new JButton(new AbstractAction("搜索") {
-            @Override public void actionPerformed(ActionEvent e) { doSearch(); }
-        });
-        queryField.addActionListener(e -> doSearch());
-        // 顶部条将在稍后与“描述”合并为一行
+        // 顶部按钮已移除（搜索、预览不再显示，预览保留 Alt+P 快捷键）
 
         // 建议弹层
         JScrollPane sp = new JScrollPane(suggestList);
@@ -66,7 +60,8 @@ public class UnifiedNoteAppFrame extends JFrame {
                 }
             }
         });
-        queryField.addKeyListener(new java.awt.event.KeyAdapter(){
+        // 将方向键与回车交互绑定到正文首行（使用 bodyArea 捕获按键）
+        bodyArea.addKeyListener(new java.awt.event.KeyAdapter(){
             @Override public void keyReleased(java.awt.event.KeyEvent e){
                 int code = e.getKeyCode();
                 if (code==java.awt.event.KeyEvent.VK_DOWN){
@@ -99,25 +94,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         // 左侧：结果列表
         // （已移除结果列表UI）
 
-        // 顶部一行：快捷命令 + 描述 + 搜索按钮
-        JPanel fieldsRow = new JPanel(new GridLayout(1, 2, 8, 0));
-        JPanel cmdPane = new JPanel(new BorderLayout());
-        cmdPane.add(new JLabel("快捷命令:"), BorderLayout.WEST);
-        cmdPane.add(queryField, BorderLayout.CENTER);
-        JPanel descPane = new JPanel(new BorderLayout());
-        descPane.add(new JLabel("描述:"), BorderLayout.WEST);
-        descPane.add(titleField, BorderLayout.CENTER);
-        fieldsRow.add(cmdPane);
-        fieldsRow.add(descPane);
-        JPanel topBar = new JPanel(new BorderLayout(8, 0));
-        topBar.add(fieldsRow, BorderLayout.CENTER);
-        JPanel rightButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-        rightButtons.add(searchBtn);
-        previewBtnRef = new JButton(new AbstractAction("预览") {
-            @Override public void actionPerformed(ActionEvent e) { toggleInAppPreview(); }
-        });
-        rightButtons.add(previewBtnRef);
-        topBar.add(rightButtons, BorderLayout.EAST);
+        // 顶部栏移除
 
         bodyArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
         bodyArea.setLineWrap(true);
@@ -139,7 +116,6 @@ public class UnifiedNoteAppFrame extends JFrame {
         editor.add(actionsPanel, BorderLayout.SOUTH);
 
         setLayout(new BorderLayout(8, 8));
-        add(topBar, BorderLayout.NORTH);
         add(editor, BorderLayout.CENTER);
         centerComponent = editor;
         ACTIVE = this;
@@ -165,6 +141,20 @@ public class UnifiedNoteAppFrame extends JFrame {
             @Override public void actionPerformed(ActionEvent e) { toggleInAppPreview(); }
         });
 
+        // 程序内快捷键：Alt+D / 右Alt(AltGr)+D / Ctrl+Alt+D -> 删除(软)
+        KeyStroke ksAltD = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_D, java.awt.event.InputEvent.ALT_DOWN_MASK);
+        KeyStroke ksAltGrD = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_D, java.awt.event.InputEvent.ALT_GRAPH_DOWN_MASK);
+        KeyStroke ksCtrlAltD = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_D, java.awt.event.InputEvent.ALT_DOWN_MASK | java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltD, "softDelete");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltGrD, "softDelete");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlAltD, "softDelete");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksAltD, "softDelete");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksAltGrD, "softDelete");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksCtrlAltD, "softDelete");
+        root.getActionMap().put("softDelete", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { deleteCurrent(); }
+        });
+
         // 添加 KeyEventDispatcher 作为兜底方案，捕获所有 Alt+P 组合
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(new KeyEventDispatcher() {
             @Override
@@ -183,6 +173,14 @@ public class UnifiedNoteAppFrame extends JFrame {
                     SwingUtilities.invokeLater(() -> toggleInAppPreview());
                     return true; // 消费此事件
                 }
+                // 检查是否为 Alt+D 组合（按键按下事件）
+                if (e.getID() == java.awt.event.KeyEvent.KEY_PRESSED &&
+                    e.getKeyCode() == java.awt.event.KeyEvent.VK_D &&
+                    (e.isAltDown() || e.isAltGraphDown())) {
+                    System.out.println("KeyEventDispatcher 捕获到 Alt+D，触发删除(软)");
+                    SwingUtilities.invokeLater(() -> deleteCurrent());
+                    return true;
+                }
                 return false;
             }
         });
@@ -195,7 +193,8 @@ public class UnifiedNoteAppFrame extends JFrame {
     private JScrollPane bodyScrollPane;
     private JPanel actionsPanel;
     private Component centerComponent;
-    private JButton previewBtnRef;
+    // 预览按钮已移除，保留占位避免大范围改动
+    // private JButton previewBtnRef;
     // 保持最近激活实例，便于全局热键调用
     private static volatile UnifiedNoteAppFrame ACTIVE;
     public static UnifiedNoteAppFrame getActiveInstance() { return ACTIVE; }
@@ -219,7 +218,6 @@ public class UnifiedNoteAppFrame extends JFrame {
 
             refreshInAppPreview();
             previewVisible = true;
-            previewBtnRef.setText("收起预览");
             // 安装实时预览（去抖200ms）
             if (previewTimer == null) {
                 previewTimer = new javax.swing.Timer(200, e -> refreshInAppPreview());
@@ -242,7 +240,6 @@ public class UnifiedNoteAppFrame extends JFrame {
             revalidate();
             repaint();
             previewVisible = false;
-            previewBtnRef.setText("预览");
         }
     }
 
@@ -313,20 +310,30 @@ public class UnifiedNoteAppFrame extends JFrame {
     }
 
     private void updateSuggestions(){
-        String q = queryField.getText()==null? "": queryField.getText().trim();
+        // 仅在首行时触发联想
+        int caret = bodyArea.getCaretPosition();
+        int firstNl = bodyArea.getText().indexOf('\n');
+        if (firstNl >= 0 && caret > firstNl) { suggestPopup.setVisible(false); return; }
+        String[] parsed = parseFirstLine(bodyArea.getText());
+        String q = parsed[1].isEmpty()? parsed[2] : parsed[1];
+        if (q == null) q = "";
         if (q.isEmpty()) { suggestPopup.setVisible(false); return; }
-        List<NoteDto> list = repository.searchByKeyOrText(q, 20);
+        // 优先 key 前缀，无结果再按描述包含
+        List<NoteDto> list = repository.searchByKeyPrefix(q, 20);
+        if (list.isEmpty()) list = repository.searchByDescContains(q, 20);
         suggestModel.clear();
         for (NoteDto n : list){
             String key = (n.key!=null?n.key:"");
             String desc = (n.desc!=null?n.desc: n.title!=null?n.title:"");
-            suggestModel.addElement(key + (key.isEmpty()? "": ": ") + desc);
+            suggestModel.addElement(key + (key.isEmpty()? "": " ") + desc);
         }
         if (suggestModel.size()>0){
             try{
-                Rectangle r = queryField.getBounds();
-                suggestPopup.show(queryField, 0, r.height);
-                javax.swing.SwingUtilities.invokeLater(() -> queryField.requestFocusInWindow());
+                // 在正文首行下方显示
+                Rectangle r = bodyArea.modelToView(Math.min(firstNl>=0? firstNl : bodyArea.getText().length(), bodyArea.getCaretPosition()));
+                if (r == null) r = new Rectangle(0, 0, 400, bodyArea.getFontMetrics(bodyArea.getFont()).getHeight());
+                suggestPopup.show(bodyArea, 0, r.y + r.height);
+                javax.swing.SwingUtilities.invokeLater(() -> bodyArea.requestFocusInWindow());
             }catch(Exception ignored){}
         }else{
             suggestPopup.setVisible(false);
@@ -341,8 +348,15 @@ public class UnifiedNoteAppFrame extends JFrame {
             s = suggestModel.size()>0 ? suggestModel.get(0) : null;
         }
         if (s==null || s.trim().isEmpty()) return;
-        String key = s.contains(":")? s.substring(0, s.indexOf(":")) : s;
-        queryField.setText(key);
+        String key; String desc = "";
+        int sp = s.indexOf(' ');
+        if (sp > 0) { key = s.substring(0, sp).trim(); desc = s.substring(sp+1).trim(); }
+        else { key = s.trim(); }
+        // 替换首行为“key 空格 desc”，其余正文保持
+        String text = bodyArea.getText();
+        int nl = text.indexOf('\n');
+        String rest = nl >= 0 ? text.substring(nl) : "";
+        bodyArea.setText(key + (desc.isEmpty()? "": (" " + desc)) + rest);
         suggestPopup.setVisible(false);
         suggestSelectedIndex = -1;
         List<NoteDto> list = repository.searchByKeyOrText(key, 1);
@@ -354,18 +368,17 @@ public class UnifiedNoteAppFrame extends JFrame {
     private void loadNote(NoteDto n){
         if (n == null) return;
         current = n;
-        // 将快捷命令显示到顶部输入框
-        queryField.setText(n.key==null? "": n.key);
-        // 描述优先显示 desc，不存在则回退 title
-        titleField.setText(n.desc!=null? n.desc : (n.title==null? "": n.title));
-        // 已去除标签显示
-        bodyArea.setText(n.bodyMd==null? "": n.bodyMd);
+        String first = (n.key==null? "" : n.key) + (n.desc!=null && !n.desc.isEmpty()? (" " + n.desc) : "");
+        String body = n.bodyMd==null? "" : n.bodyMd;
+        if (!body.startsWith("\n") && !body.isEmpty()) body = "\n" + body;
+        bodyArea.setText(first + body);
     }
 
-    private void doSearch() {
-        String q = queryField.getText()==null? "": queryField.getText().trim();
-        updateSuggestions();
-        List<NoteDto> list = repository.searchByKeyOrText(q, 1);
+    private void doSearchFromFirstLine() {
+        String[] parsed = parseFirstLine(bodyArea.getText());
+        String q = parsed[1].isEmpty()? parsed[2] : parsed[1];
+        if (q==null) q="";
+        List<NoteDto> list = repository.searchByKeyOrText(q.trim(), 1);
         if (!list.isEmpty()) {
             loadNote(list.get(0));
         }
@@ -373,20 +386,20 @@ public class UnifiedNoteAppFrame extends JFrame {
 
     private void clearEditor() {
         current = null;
-        queryField.setText("");
-        titleField.setText("");
         bodyArea.setText("");
-        queryField.requestFocus();
+        bodyArea.requestFocus();
     }
 
     private void saveNew() {
+        String[] parsed = splitFirstLineAndBody(bodyArea.getText());
+        if (parsed[1].isEmpty()) { JOptionPane.showMessageDialog(this, "首行需包含快捷命令", "校验", JOptionPane.WARNING_MESSAGE); return; }
         NoteDto n = new NoteDto();
         n.id = UUID.randomUUID().toString();
-        n.key = trimOrNull(queryField.getText());
-        n.desc = orDefault(titleField.getText(), "");
-        n.title = n.desc; // 保持标题=描述
+        n.key = parsed[1];
+        n.desc = parsed[2];
+        n.title = n.desc;
         n.tags = new java.util.ArrayList<>();
-        n.bodyMd = bodyArea.getText();
+        n.bodyMd = parsed[3];
         n.frontMatter = null;
         long now = System.currentTimeMillis();
         n.createdAt = now;
@@ -394,7 +407,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         n.version = 1;
         repository.save(n);
         JOptionPane.showMessageDialog(this, "已保存为新", "提示", JOptionPane.INFORMATION_MESSAGE);
-        doSearch();
+        loadNote(n);
     }
 
     private void updateCurrent() {
@@ -403,16 +416,38 @@ public class UnifiedNoteAppFrame extends JFrame {
             saveNew();
             return;
         }
-        current.key = trimOrNull(queryField.getText());
-        current.desc = orDefault(titleField.getText(), "");
-        current.title = current.desc; // 保持标题=描述
+        String[] parsed = splitFirstLineAndBody(bodyArea.getText());
+        if (parsed[1].isEmpty()) { JOptionPane.showMessageDialog(this, "首行需包含快捷命令", "校验", JOptionPane.WARNING_MESSAGE); return; }
+        String newKey = parsed[1];
+        // 如果快捷命令已改变，则按“保存为新”处理；否则更新当前
+        if (!newKey.equals(current.key)) {
+            NoteDto n = new NoteDto();
+            n.id = UUID.randomUUID().toString();
+            n.key = newKey;
+            n.desc = parsed[2];
+            n.title = n.desc;
+            n.tags = new java.util.ArrayList<>();
+            n.bodyMd = parsed[3];
+            n.frontMatter = null;
+            long now = System.currentTimeMillis();
+            n.createdAt = now;
+            n.updatedAt = now;
+            n.version = 1;
+            repository.save(n);
+            JOptionPane.showMessageDialog(this, "已保存为新（快捷命令已变更）", "提示", JOptionPane.INFORMATION_MESSAGE);
+            loadNote(n);
+            return;
+        }
+        current.key = newKey;
+        current.desc = parsed[2];
+        current.title = current.desc;
         current.tags = new java.util.ArrayList<>();
-        current.bodyMd = bodyArea.getText();
+        current.bodyMd = parsed[3];
         current.updatedAt = System.currentTimeMillis();
         current.version = Math.max(1, current.version + 1);
         repository.save(current);
         JOptionPane.showMessageDialog(this, "已更新", "提示", JOptionPane.INFORMATION_MESSAGE);
-        doSearch();
+        loadNote(current);
     }
 
     private void saveUnified() {
@@ -431,14 +466,40 @@ public class UnifiedNoteAppFrame extends JFrame {
         int opt = JOptionPane.showConfirmDialog(this, "确认删除（可恢复）?", "确认", JOptionPane.YES_NO_OPTION);
         if (opt == JOptionPane.YES_OPTION) {
             repository.softDelete(current.id);
-            clearEditor();
-            doSearch();
+            clearEditor(); // 删除后不再自动加载下一条，保持界面空白
         }
     }
 
     private static String orDefault(String s, String d) { return (s==null||s.trim().isEmpty())?d:s; }
     private static String trimOrNull(String s) { return (s==null)?null:(s.trim().isEmpty()?null:s.trim()); }
-    // 已去除标签编辑，保留空实现
+
+    // 解析首行：返回 [rawFirstLine, key, desc]
+    private String[] parseFirstLine(String text){
+        if (text == null) return new String[]{"","",""};
+        int i = text.indexOf('\n');
+        String first = i>=0? text.substring(0, i) : text;
+        String key = ""; String desc = "";
+        String t = first.trim();
+        if (!t.isEmpty()){
+            int sp = t.indexOf(' ');
+            if (sp < 0){ key = t; }
+            else { key = t.substring(0, sp).trim(); desc = t.substring(sp+1).trim(); }
+        }
+        return new String[]{first, key, desc};
+    }
+
+    // 拆分首行+正文：返回 [firstLine, key, desc, body]
+    private String[] splitFirstLineAndBody(String text){
+        if (text == null) return new String[]{"","","",""};
+        int i = text.indexOf('\n');
+        String first = i>=0? text.substring(0, i) : text;
+        String body = i>=0? text.substring(i+1) : "";
+        String[] f = parseFirstLine(first);
+        // key 校验：去除多余空白，取第一个片段
+        String key = f[1] == null ? "" : f[1].trim();
+        if (key.contains(" ")) key = key.replaceAll("\\s+"," ").split(" ")[0];
+        return new String[]{first, key, f[2], body};
+    }
 }
 
 

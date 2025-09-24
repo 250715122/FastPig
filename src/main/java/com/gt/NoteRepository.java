@@ -58,7 +58,7 @@ public class NoteRepository {
         } catch (SQLException e) {
             // 若因 key 唯一约束失败，则按 key 进行更新（幂等覆盖）
             if (e.getMessage() != null && e.getMessage().contains("UNIQUE constraint failed: snippets.key")) {
-                String up = "UPDATE snippets SET title=?, desc=?, tags_json=?, body_md=?, front_matter=?, updated_at=?, version=? WHERE key=?";
+                String up = "UPDATE snippets SET title=?, desc=?, tags_json=?, body_md=?, front_matter=?, updated_at=?, version=?, deleted=0 WHERE key=?";
                 try (Connection c2 = getConnection(); PreparedStatement ps2 = c2.prepareStatement(up)) {
                     ps2.setString(1, note.title);
                     ps2.setString(2, note.desc);
@@ -102,6 +102,43 @@ public class NoteRepository {
             return list;
         } catch (SQLException e) {
             throw new RuntimeException("检索失败: " + e.getMessage(), e);
+        }
+    }
+
+    // 优先：按 key 前缀匹配
+    public List<NoteDto> searchByKeyPrefix(String prefix, int limit) {
+        String like = prefix == null ? "" : prefix.toLowerCase() + "%";
+        String sql = "SELECT * FROM snippets WHERE deleted=0 AND LOWER(key) LIKE ? ORDER BY updated_at DESC LIMIT ?";
+        try (Connection conn = getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, like);
+            ps.setInt(2, limit);
+            ResultSet rs = ps.executeQuery();
+            List<NoteDto> list = new ArrayList<>();
+            while (rs.next()) {
+                list.add(mapper(rs));
+            }
+            return list;
+        } catch (SQLException e) {
+            throw new RuntimeException("检索失败(key前缀): " + e.getMessage(), e);
+        }
+    }
+
+    // 备选：按 desc/title 包含匹配
+    public List<NoteDto> searchByDescContains(String query, int limit) {
+        String like = "%" + (query == null ? "" : query.toLowerCase()) + "%";
+        String sql = "SELECT * FROM snippets WHERE deleted=0 AND (LOWER(desc) LIKE ? OR LOWER(title) LIKE ?) ORDER BY updated_at DESC LIMIT ?";
+        try (Connection conn = getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, like);
+            ps.setString(2, like);
+            ps.setInt(3, limit);
+            ResultSet rs = ps.executeQuery();
+            List<NoteDto> list = new ArrayList<>();
+            while (rs.next()) {
+                list.add(mapper(rs));
+            }
+            return list;
+        } catch (SQLException e) {
+            throw new RuntimeException("检索失败(desc包含): " + e.getMessage(), e);
         }
     }
 
