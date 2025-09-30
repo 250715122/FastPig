@@ -10,6 +10,8 @@ import java.util.UUID;
 import java.util.Base64;
 import java.io.ByteArrayOutputStream;
 import javax.imageio.ImageIO;
+import javax.swing.text.Highlighter;
+import javax.swing.text.DefaultHighlighter;
 import java.io.File;
 
 import com.vladsch.flexmark.parser.Parser;
@@ -31,16 +33,46 @@ public class UnifiedNoteAppFrame extends JFrame {
     // 去除左侧结果列表，以输入联想替代
 
     // 去除标签与独立标题编辑，仅保留正文编辑区
-    private final JTextArea bodyArea = new JTextArea();
+    private final JTextArea bodyArea = new JTextArea(){
+        @Override protected void paintComponent(Graphics g){
+            super.paintComponent(g);
+            try{
+                if (getDocument().getLength()==0){
+                    Graphics2D g2 = (Graphics2D) g.create();
+                    g2.setColor(new Color(0,0,0,110));
+                    g2.setFont(getFont().deriveFont(Font.ITALIC));
+                    String hint = "在此输入：快捷命令 空格 描述；第二行开始正文（Ctrl+S保存，Alt+P预览，Alt+D删除）";
+                    FontMetrics fm = g2.getFontMetrics();
+                    int x = getInsets().left + 6;
+                    int y = getInsets().top + fm.getAscent() + 2;
+                    g2.drawString(hint, x, y);
+                    g2.dispose();
+                }
+            }catch(Exception ignored){}
+        }
+    };
+    private final Highlighter.HighlightPainter firstLinePainter = new DefaultHighlighter.DefaultHighlightPainter(new Color(255,255,0,40));
+    private Object firstLineHighlightTag;
 
     private NoteDto current;
 
     public UnifiedNoteAppFrame(NoteRepository repository) {
         super("迅猪 - 统一界面（搜索/展示/编辑/保存）");
         this.repository = repository;
-        setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setSize(1100, 720);
         setLocationRelativeTo(null);
+        
+        // 添加窗口关闭监听器，确保关闭时触发同步
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent e) {
+                System.out.println("[关闭] 正在同步数据库到云端...");
+                DbSyncService.getInstance().syncToCloudSilently();
+                System.out.println("[关闭] 同步完成，退出程序");
+                System.exit(0);
+            }
+        });
 
         // 顶部按钮已移除（搜索、预览不再显示，预览保留 Alt+P 快捷键）
 
@@ -99,21 +131,24 @@ public class UnifiedNoteAppFrame extends JFrame {
         bodyArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
         bodyArea.setLineWrap(true);
         bodyScrollPane = new JScrollPane(bodyArea);
-
-        JButton saveUnifiedBtn = new JButton(new AbstractAction("保存") {
-            @Override public void actionPerformed(ActionEvent e) { saveUnified(); }
+        // 首行高亮：随内容变化动态更新
+        bodyArea.getDocument().addDocumentListener(new javax.swing.event.DocumentListener(){
+            public void insertUpdate(javax.swing.event.DocumentEvent e){ updateFirstLineHighlight(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e){ updateFirstLineHighlight(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e){ updateFirstLineHighlight(); }
         });
-        JButton deleteBtn = new JButton(new AbstractAction("删除(软)") {
-            @Override public void actionPerformed(ActionEvent e) { deleteCurrent(); }
-        });
 
-        actionsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        actionsPanel.add(saveUnifiedBtn);
-        actionsPanel.add(deleteBtn);
+        // 底部状态栏
+        statusLeft = new JLabel("就绪");
+        statusRight = new JLabel("");
+        statusBar = new JPanel(new BorderLayout(8, 0));
+        statusBar.setBorder(BorderFactory.createEmptyBorder(4,8,4,8));
+        statusBar.add(statusLeft, BorderLayout.WEST);
+        statusBar.add(statusRight, BorderLayout.EAST);
 
         JPanel editor = new JPanel(new BorderLayout(8, 8));
         editor.add(bodyScrollPane, BorderLayout.CENTER);
-        editor.add(actionsPanel, BorderLayout.SOUTH);
+        editor.add(statusBar, BorderLayout.SOUTH);
 
         setLayout(new BorderLayout(8, 8));
         add(editor, BorderLayout.CENTER);
@@ -125,7 +160,21 @@ public class UnifiedNoteAppFrame extends JFrame {
         KeyStroke saveKs = KeyStroke.getKeyStroke("control S");
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(saveKs, "saveUnified");
         root.getActionMap().put("saveUnified", new AbstractAction() {
-            @Override public void actionPerformed(ActionEvent e) { saveUnified(); }
+            @Override public void actionPerformed(ActionEvent e) { saveUnified(true); }
+        });
+        // 自动保存：3秒去抖
+        javax.swing.Timer autosaveTimer = new javax.swing.Timer(3000, e -> {
+            if (!isFirstLineStructured()) {
+                // 首行未形成“key 空格 desc”，不执行自动保存
+                return;
+            }
+            saveUnified(false);
+        });
+        autosaveTimer.setRepeats(false);
+        bodyArea.getDocument().addDocumentListener(new javax.swing.event.DocumentListener(){
+            public void insertUpdate(javax.swing.event.DocumentEvent e){ autosaveTimer.restart(); updateEditorStatus(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e){ autosaveTimer.restart(); updateEditorStatus(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e){ autosaveTimer.restart(); updateEditorStatus(); }
         });
         // 程序内快捷键：Alt+P / 右Alt(AltGr)+P / Ctrl+Alt+P -> 预览/收起预览
         KeyStroke ksAltP = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_P, java.awt.event.InputEvent.ALT_DOWN_MASK);
@@ -154,6 +203,60 @@ public class UnifiedNoteAppFrame extends JFrame {
         root.getActionMap().put("softDelete", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) { deleteCurrent(); }
         });
+        // 撤销删除 Alt+Z（左右 Alt/AltGr/Ctrl+Alt 兜底）
+        KeyStroke ksAltZ = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Z, java.awt.event.InputEvent.ALT_DOWN_MASK);
+        KeyStroke ksAltGrZ = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Z, java.awt.event.InputEvent.ALT_GRAPH_DOWN_MASK);
+        KeyStroke ksCtrlAltZ = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Z, java.awt.event.InputEvent.ALT_DOWN_MASK | java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltZ, "undoSoftDelete");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltGrZ, "undoSoftDelete");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlAltZ, "undoSoftDelete");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksAltZ, "undoSoftDelete");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksAltGrZ, "undoSoftDelete");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksCtrlAltZ, "undoSoftDelete");
+        root.getActionMap().put("undoSoftDelete", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { undoSoftDelete(); }
+        });
+        // Ctrl+` 插入代码块
+        KeyStroke ksCtrlBacktick = KeyStroke.getKeyStroke('`', java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlBacktick, "insertCodeBlock");
+        root.getActionMap().put("insertCodeBlock", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){
+                String tpl = "```\n\n```\n";
+                bodyArea.replaceSelection(tpl);
+            }
+        });
+        // Ctrl+Shift+M 插入行内 LaTeX 模板 \(…\)
+        KeyStroke ksInlineMath = KeyStroke.getKeyStroke('M', java.awt.event.InputEvent.CTRL_DOWN_MASK | java.awt.event.InputEvent.SHIFT_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksInlineMath, "insertInlineMath");
+        root.getActionMap().put("insertInlineMath", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){
+                bodyArea.replaceSelection("\\(  \\)");
+            }
+        });
+        // Ctrl+Shift+L 插入块级 LaTeX 模板 $$…$$
+        KeyStroke ksBlockMath = KeyStroke.getKeyStroke('L', java.awt.event.InputEvent.CTRL_DOWN_MASK | java.awt.event.InputEvent.SHIFT_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksBlockMath, "insertBlockMath");
+        root.getActionMap().put("insertBlockMath", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){
+                bodyArea.replaceSelection("$$\n\n$$\n");
+            }
+        });
+        // Ctrl+Alt+S 同步数据库到坚果云
+        KeyStroke ksCtrlAltS = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_S, java.awt.event.InputEvent.CTRL_DOWN_MASK | java.awt.event.InputEvent.ALT_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlAltS, "syncDbToCloud");
+        root.getActionMap().put("syncDbToCloud", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){
+                statusLeft.setText("正在同步到云端…");
+                boolean ok = DbSyncService.getInstance().syncToCloud();
+                statusLeft.setText(ok? "已同步到云端" : "同步失败");
+            }
+        });
+        // Esc 关闭补全
+        KeyStroke ksEsc = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksEsc, "hideSuggest");
+        root.getActionMap().put("hideSuggest", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ suggestPopup.setVisible(false); }
+        });
 
         // 添加 KeyEventDispatcher 作为兜底方案，捕获所有 Alt+P 组合
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(new KeyEventDispatcher() {
@@ -181,6 +284,14 @@ public class UnifiedNoteAppFrame extends JFrame {
                     SwingUtilities.invokeLater(() -> deleteCurrent());
                     return true;
                 }
+                // Alt+Z 撤销删除
+                if (e.getID() == java.awt.event.KeyEvent.KEY_PRESSED &&
+                    e.getKeyCode() == java.awt.event.KeyEvent.VK_Z &&
+                    (e.isAltDown() || e.isAltGraphDown())) {
+                    System.out.println("KeyEventDispatcher 捕获到 Alt+Z，撤销删除");
+                    SwingUtilities.invokeLater(() -> undoSoftDelete());
+                    return true;
+                }
                 return false;
             }
         });
@@ -191,13 +302,26 @@ public class UnifiedNoteAppFrame extends JFrame {
     private JEditorPane htmlPane;
     private javax.swing.Timer previewTimer;
     private JScrollPane bodyScrollPane;
-    private JPanel actionsPanel;
+    private JPanel statusBar;
+    private JLabel statusLeft;
+    private JLabel statusRight;
+    private long lastSavedAt = 0L;
+    private boolean darkTheme = false;
     private Component centerComponent;
     // 预览按钮已移除，保留占位避免大范围改动
     // private JButton previewBtnRef;
     // 保持最近激活实例，便于全局热键调用
     private static volatile UnifiedNoteAppFrame ACTIVE;
     public static UnifiedNoteAppFrame getActiveInstance() { return ACTIVE; }
+    
+    /**
+     * 让主编辑区获得焦点
+     */
+    public void focusEditor() {
+        try {
+            SwingUtilities.invokeLater(() -> bodyArea.requestFocusInWindow());
+        } catch (Exception ignored) {}
+    }
 
     private void toggleInAppPreview() {
         if (!previewVisible) {
@@ -234,7 +358,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             bodyScrollPane = new JScrollPane(bodyArea);
             JPanel editor2 = new JPanel(new BorderLayout(8, 8));
             editor2.add(bodyScrollPane, BorderLayout.CENTER);
-            editor2.add(actionsPanel, BorderLayout.SOUTH);
+            editor2.add(statusBar, BorderLayout.SOUTH);
             centerComponent = editor2;
             getContentPane().add(centerComponent, BorderLayout.CENTER);
             revalidate();
@@ -245,11 +369,37 @@ public class UnifiedNoteAppFrame extends JFrame {
 
     private void refreshInAppPreview() {
         String md = bodyArea.getText();
+        // 大文档降频：超过 50KB 时预览去抖提升到 600ms
+        if (md != null && md.length() > 50 * 1024 && previewTimer != null) {
+            int delay = 600;
+            if (previewTimer.getDelay() != delay) previewTimer.setDelay(delay);
+        }
         // 将所有 LaTeX 片段替换为内联图片占位
         String mdWithImgs = replaceAllLatexWithImages(md);
         String html = renderMarkdown(mdWithImgs);
         htmlPane.setText("<html><head><meta charset='utf-8'></head><body style='font-family:Segoe UI;line-height:1.6;white-space:pre-wrap;'>" + html + "</body></html>");
         htmlPane.setCaretPosition(0);
+        // 预览指示浮标
+        try {
+            JLayeredPane layered = getLayeredPane();
+            JLabel badge = new JLabel("预览中（Alt+P退出）");
+            badge.setOpaque(true);
+            badge.setBackground(new Color(0,0,0,150));
+            badge.setForeground(Color.WHITE);
+            badge.setBorder(BorderFactory.createEmptyBorder(4,8,4,8));
+            Dimension sz = badge.getPreferredSize();
+            int x = getWidth() - sz.width - 24;
+            int y = 12;
+            badge.setBounds(x, y, sz.width, sz.height);
+            layered.add(badge, JLayeredPane.POPUP_LAYER);
+            javax.swing.Timer t = new javax.swing.Timer(1200, e -> {
+                layered.remove(badge);
+                layered.revalidate();
+                layered.repaint();
+            });
+            t.setRepeats(false);
+            t.start();
+        } catch (Exception ignored) {}
     }
 
     private String renderMarkdown(String md) {
@@ -271,17 +421,24 @@ public class UnifiedNoteAppFrame extends JFrame {
         return out;
     }
 
+    private final java.util.Map<String, BufferedImage> latexImageCache = new java.util.HashMap<>();
     private BufferedImage renderLatexToImage(String latex) {
-        TeXFormula formula = new TeXFormula(latex);
-        TeXIcon icon = formula.createTeXIcon(TeXConstants.STYLE_DISPLAY, 20f);
-        BufferedImage image = new BufferedImage(icon.getIconWidth(), icon.getIconHeight(), BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g2 = image.createGraphics();
-        g2.setColor(new Color(0,0,0,0));
-        g2.fillRect(0, 0, image.getWidth(), image.getHeight());
-        g2.setColor(Color.BLACK);
-        icon.paintIcon(new JLabel(), g2, 0, 0);
-        g2.dispose();
-        return image;
+        try{
+            if (latexImageCache.containsKey(latex)) return latexImageCache.get(latex);
+            TeXFormula formula = new TeXFormula(latex);
+            TeXIcon icon = formula.createTeXIcon(TeXConstants.STYLE_DISPLAY, 20f);
+            BufferedImage image = new BufferedImage(icon.getIconWidth(), icon.getIconHeight(), BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g2 = image.createGraphics();
+            g2.setColor(new Color(0,0,0,0));
+            g2.fillRect(0, 0, image.getWidth(), image.getHeight());
+            g2.setColor(Color.BLACK);
+            icon.paintIcon(new JLabel(), g2, 0, 0);
+            g2.dispose();
+            latexImageCache.put(latex, image);
+            return image;
+        }catch(Exception ex){
+            return new BufferedImage(1,1,BufferedImage.TYPE_INT_ARGB);
+        }
     }
 
     private String replaceByRegex(String input, String regex, boolean block) {
@@ -357,6 +514,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         int nl = text.indexOf('\n');
         String rest = nl >= 0 ? text.substring(nl) : "";
         bodyArea.setText(key + (desc.isEmpty()? "": (" " + desc)) + rest);
+        updateFirstLineHighlight();
         suggestPopup.setVisible(false);
         suggestSelectedIndex = -1;
         List<NoteDto> list = repository.searchByKeyOrText(key, 1);
@@ -372,6 +530,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         String body = n.bodyMd==null? "" : n.bodyMd;
         if (!body.startsWith("\n") && !body.isEmpty()) body = "\n" + body;
         bodyArea.setText(first + body);
+        updateFirstLineHighlight();
+        updateEditorStatus();
     }
 
     private void doSearchFromFirstLine() {
@@ -388,9 +548,11 @@ public class UnifiedNoteAppFrame extends JFrame {
         current = null;
         bodyArea.setText("");
         bodyArea.requestFocus();
+        updateFirstLineHighlight();
+        updateEditorStatus();
     }
 
-    private void saveNew() {
+    private void saveNew(boolean manual) {
         String[] parsed = splitFirstLineAndBody(bodyArea.getText());
         if (parsed[1].isEmpty()) { JOptionPane.showMessageDialog(this, "首行需包含快捷命令", "校验", JOptionPane.WARNING_MESSAGE); return; }
         NoteDto n = new NoteDto();
@@ -406,14 +568,14 @@ public class UnifiedNoteAppFrame extends JFrame {
         n.updatedAt = now;
         n.version = 1;
         repository.save(n);
-        JOptionPane.showMessageDialog(this, "已保存为新", "提示", JOptionPane.INFORMATION_MESSAGE);
+        if (manual) JOptionPane.showMessageDialog(this, "已保存为新", "提示", JOptionPane.INFORMATION_MESSAGE);
         loadNote(n);
     }
 
-    private void updateCurrent() {
+    private void updateCurrent(boolean manual) {
         if (current == null) {
             // 等价保存为新
-            saveNew();
+            saveNew(manual);
             return;
         }
         String[] parsed = splitFirstLineAndBody(bodyArea.getText());
@@ -434,7 +596,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             n.updatedAt = now;
             n.version = 1;
             repository.save(n);
-            JOptionPane.showMessageDialog(this, "已保存为新（快捷命令已变更）", "提示", JOptionPane.INFORMATION_MESSAGE);
+            if (manual) JOptionPane.showMessageDialog(this, "已保存为新（快捷命令已变更）", "提示", JOptionPane.INFORMATION_MESSAGE);
             loadNote(n);
             return;
         }
@@ -446,15 +608,23 @@ public class UnifiedNoteAppFrame extends JFrame {
         current.updatedAt = System.currentTimeMillis();
         current.version = Math.max(1, current.version + 1);
         repository.save(current);
-        JOptionPane.showMessageDialog(this, "已更新", "提示", JOptionPane.INFORMATION_MESSAGE);
+        if (manual) JOptionPane.showMessageDialog(this, "已更新", "提示", JOptionPane.INFORMATION_MESSAGE);
         loadNote(current);
     }
 
-    private void saveUnified() {
-        if (current == null) {
-            saveNew();
-        } else {
-            updateCurrent();
+    private void saveUnified(boolean manual) {
+        try{
+            statusLeft.setText(manual? "保存中…" : "自动保存中…");
+            if (current == null) {
+                saveNew(manual);
+            } else {
+                updateCurrent(manual);
+            }
+            lastSavedAt = System.currentTimeMillis();
+            statusLeft.setText(manual? "已保存" : "已自动保存");
+            updateEditorStatus();
+        }catch(Exception ex){
+            statusLeft.setText("保存失败（重试）");
         }
     }
 
@@ -466,12 +636,108 @@ public class UnifiedNoteAppFrame extends JFrame {
         int opt = JOptionPane.showConfirmDialog(this, "确认删除（可恢复）?", "确认", JOptionPane.YES_NO_OPTION);
         if (opt == JOptionPane.YES_OPTION) {
             repository.softDelete(current.id);
+            // 保存最近一次删除，用于撤销
+            lastDeletedKey = current.key;
+            lastDeletedExpireAt = System.currentTimeMillis() + 60000; // 60秒内可撤销
             clearEditor(); // 删除后不再自动加载下一条，保持界面空白
+            startUndoCountdown(60);
         }
+    }
+
+    // 撤销删除（Alt+Z 在5秒内有效）
+    private String lastDeletedKey;
+    private long lastDeletedExpireAt = 0L;
+    private javax.swing.Timer undoCountdownTimer;
+    private int undoSecondsRemaining = 0;
+
+    private void startUndoCountdown(int seconds){
+        try{
+            if (undoCountdownTimer != null) { undoCountdownTimer.stop(); }
+            undoSecondsRemaining = Math.max(0, seconds);
+            updateUndoStatusBar();
+            undoCountdownTimer = new javax.swing.Timer(1000, e -> {
+                undoSecondsRemaining--;
+                if (undoSecondsRemaining <= 0) {
+                    stopUndoCountdown();
+                    // 撤销期结束
+                    lastDeletedKey = null;
+                    lastDeletedExpireAt = 0L;
+                    statusLeft.setText("就绪");
+                } else {
+                    updateUndoStatusBar();
+                }
+            });
+            undoCountdownTimer.setRepeats(true);
+            undoCountdownTimer.start();
+        }catch(Exception ignored){}
+    }
+
+    private void stopUndoCountdown(){
+        if (undoCountdownTimer != null) {
+            undoCountdownTimer.stop();
+            undoCountdownTimer = null;
+        }
+        undoSecondsRemaining = 0;
+    }
+
+    private void updateUndoStatusBar(){
+        statusLeft.setText("已删除，" + undoSecondsRemaining + "秒内按 Alt+Z 撤销");
     }
 
     private static String orDefault(String s, String d) { return (s==null||s.trim().isEmpty())?d:s; }
     private static String trimOrNull(String s) { return (s==null)?null:(s.trim().isEmpty()?null:s.trim()); }
+
+    // 首行高亮更新：选中 0..首个换行（或全文长度）
+    private void updateFirstLineHighlight(){
+        try{
+            Highlighter hl = bodyArea.getHighlighter();
+            if (firstLineHighlightTag != null){
+                hl.removeHighlight(firstLineHighlightTag);
+                firstLineHighlightTag = null;
+            }
+            String text = bodyArea.getText();
+            if (text == null) return;
+            int end = text.indexOf('\n');
+            if (end < 0) end = text.length();
+            if (end > 0){
+                firstLineHighlightTag = hl.addHighlight(0, end, firstLinePainter);
+            }
+        }catch(Exception ignored){}
+    }
+
+    private void undoSoftDelete(){
+        long now = System.currentTimeMillis();
+        if (lastDeletedKey == null || now > lastDeletedExpireAt){
+            JOptionPane.showMessageDialog(this, "撤销已过期", "提示", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        try{
+            repository.restoreByKey(lastDeletedKey);
+            NoteDto n = repository.findByKey(lastDeletedKey);
+            lastDeletedKey = null;
+            lastDeletedExpireAt = 0L;
+            stopUndoCountdown();
+            statusLeft.setText("已恢复");
+            if (n != null) loadNote(n);
+        }catch(Exception ex){
+            JOptionPane.showMessageDialog(this, "恢复失败: "+ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    // 更新状态栏右侧：行:列、字数、更新时间
+    private void updateEditorStatus(){
+        try{
+            int caret = bodyArea.getCaretPosition();
+            String text = bodyArea.getText();
+            int line = 1, col = 1;
+            for (int i = 0; i < Math.min(caret, text.length()); i++){
+                if (text.charAt(i) == '\n'){ line++; col = 1; } else { col++; }
+            }
+            int len = text == null ? 0 : text.length();
+            String time = lastSavedAt == 0 ? "" : new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date(lastSavedAt));
+            statusRight.setText("" + line + ":" + col + "  |  " + len + "字  " + (time.isEmpty()? "": (" |  更新时间 " + time)));
+        }catch(Exception ignored){}
+    }
 
     // 解析首行：返回 [rawFirstLine, key, desc]
     private String[] parseFirstLine(String text){
@@ -499,6 +765,15 @@ public class UnifiedNoteAppFrame extends JFrame {
         String key = f[1] == null ? "" : f[1].trim();
         if (key.contains(" ")) key = key.replaceAll("\\s+"," ").split(" ")[0];
         return new String[]{first, key, f[2], body};
+    }
+
+    // 判断首行是否为 "非空key + 空格 + 非空desc" 结构
+    private boolean isFirstLineStructured(){
+        String[] f = parseFirstLine(bodyArea.getText());
+        String key = f[1] == null? "" : f[1].trim();
+        String desc = f[2] == null? "" : f[2].trim();
+        if (key.isEmpty() || key.contains(" ")) return false;
+        return !desc.isEmpty();
     }
 }
 

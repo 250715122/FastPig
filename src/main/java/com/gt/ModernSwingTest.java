@@ -40,6 +40,8 @@ public class ModernSwingTest extends JFrame {
 
     public static void main(String[] args) throws IOException {
         System.out.println("启动现代化代码助手...");
+        // 启动前：尝试从坚果云目录拉取最新数据库
+        DbSyncService.getInstance().syncFromCloudOnStart();
         
         // 启动统一界面
         NoteRepository repo = new NoteRepository(System.getProperty("user.dir") + "/fastpig.db");
@@ -67,6 +69,8 @@ public class ModernSwingTest extends JFrame {
                 if (hotKeyManager != null) {
                     hotKeyManager.cleanup();
                 }
+                // 关闭前：同步本地数据库到坚果云
+                DbSyncService.getInstance().syncToCloudSilently();
                 System.exit(0);
             }
         });

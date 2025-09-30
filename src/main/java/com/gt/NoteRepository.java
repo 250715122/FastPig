@@ -151,6 +151,27 @@ public class NoteRepository {
         }
     }
 
+    public void restoreByKey(String key) {
+        try (Connection conn = getConnection(); PreparedStatement ps = conn.prepareStatement("UPDATE snippets SET deleted=0 WHERE key=?")) {
+            ps.setString(1, key);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("恢复失败: " + e.getMessage(), e);
+        }
+    }
+
+    public NoteDto findByKey(String key) {
+        String sql = "SELECT * FROM snippets WHERE key=? LIMIT 1";
+        try (Connection conn = getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, key);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) return mapper(rs);
+            return null;
+        } catch (SQLException e) {
+            throw new RuntimeException("按key查询失败: " + e.getMessage(), e);
+        }
+    }
+
     private NoteDto mapper(ResultSet rs) throws SQLException {
         NoteDto n = new NoteDto();
         n.id = rs.getString("id");

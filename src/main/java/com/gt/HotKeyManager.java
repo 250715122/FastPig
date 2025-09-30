@@ -227,25 +227,30 @@ public class HotKeyManager {
      * 显示窗口（正常大小）
      */
     private void showWindowNormal() {
+        // 优先操作新的统一面板
+        UnifiedNoteAppFrame active = UnifiedNoteAppFrame.getActiveInstance();
+        if (active != null) {
+            active.setVisible(true);
+            active.setExtendedState(JFrame.NORMAL);
+            active.toFront();
+            active.requestFocus();
+            active.setAlwaysOnTop(true);
+            active.setAlwaysOnTop(false);
+            active.focusEditor();
+            System.out.println("窗口已恢复正常大小");
+            return;
+        }
+        // 退化处理：使用旧的 targetFrame
         if (targetFrame != null) {
-            // 强制显示窗口
             targetFrame.setVisible(true);
-            // 恢复正常状态
             targetFrame.setExtendedState(JFrame.NORMAL);
-            // 置顶并获得焦点
             targetFrame.toFront();
             targetFrame.requestFocus();
-            // 确保窗口在任务栏中可见
             targetFrame.setAlwaysOnTop(true);
             targetFrame.setAlwaysOnTop(false);
-            
             if (targetTextArea != null) {
-                // 延迟聚焦文本区域，确保窗口完全显示后再聚焦
-                javax.swing.SwingUtilities.invokeLater(() -> {
-                    targetTextArea.requestFocusInWindow();
-                });
+                javax.swing.SwingUtilities.invokeLater(() -> targetTextArea.requestFocusInWindow());
             }
-            
             System.out.println("窗口已恢复正常大小");
         }
     }
@@ -254,25 +259,28 @@ public class HotKeyManager {
      * 显示窗口（最大化）
      */
     private void showWindowMaximized() {
+        UnifiedNoteAppFrame active = UnifiedNoteAppFrame.getActiveInstance();
+        if (active != null) {
+            active.setVisible(true);
+            active.setExtendedState(JFrame.MAXIMIZED_BOTH);
+            active.toFront();
+            active.requestFocus();
+            active.setAlwaysOnTop(true);
+            active.setAlwaysOnTop(false);
+            active.focusEditor();
+            System.out.println("窗口已最大化显示");
+            return;
+        }
         if (targetFrame != null) {
-            // 强制显示窗口
             targetFrame.setVisible(true);
-            // 最大化窗口
             targetFrame.setExtendedState(JFrame.MAXIMIZED_BOTH);
-            // 置顶并获得焦点
             targetFrame.toFront();
             targetFrame.requestFocus();
-            // 确保窗口在任务栏中可见
             targetFrame.setAlwaysOnTop(true);
             targetFrame.setAlwaysOnTop(false);
-            
             if (targetTextArea != null) {
-                // 延迟聚焦文本区域，确保窗口完全显示后再聚焦
-                javax.swing.SwingUtilities.invokeLater(() -> {
-                    targetTextArea.requestFocusInWindow();
-                });
+                javax.swing.SwingUtilities.invokeLater(() -> targetTextArea.requestFocusInWindow());
             }
-            
             System.out.println("窗口已最大化显示");
         }
     }
@@ -281,6 +289,12 @@ public class HotKeyManager {
      * 最小化窗口
      */
     private void minimizeWindow() {
+        UnifiedNoteAppFrame active = UnifiedNoteAppFrame.getActiveInstance();
+        if (active != null) {
+            active.setExtendedState(JFrame.ICONIFIED);
+            System.out.println("窗口已最小化");
+            return;
+        }
         if (targetFrame != null) {
             targetFrame.setExtendedState(JFrame.ICONIFIED);
             System.out.println("窗口已最小化");

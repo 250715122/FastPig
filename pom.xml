@@ -12,6 +12,8 @@
 
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<maven.compiler.source>11</maven.compiler.source>
+		<maven.compiler.target>11</maven.compiler.target>
 		<hadoop.version>2.5.0</hadoop.version>
 		<hive.version>0.13.1</hive.version>
 	</properties>
@@ -82,6 +84,13 @@
 		    <groupId>org.scilab.forge</groupId>
 		    <artifactId>jlatexmath</artifactId>
 		    <version>1.0.7</version>
+		</dependency>
+
+		<!-- Sardine WebDAV Client for 坚果云同步 -->
+		<dependency>
+		    <groupId>com.github.lookfirst</groupId>
+		    <artifactId>sardine</artifactId>
+		    <version>5.10</version>
 		</dependency>
 
 	</dependencies>
@@ -161,7 +170,7 @@
           </descriptorRefs>
           <archive>
             <manifest>
-              <mainClass></mainClass>
+              <mainClass>com.gt.ModernSwingTest</mainClass>
             </manifest>
           </archive>
         </configuration>
@@ -175,6 +184,11 @@
           </execution>
         </executions>
       </plugin>
+      
+      <!-- 
+        注意：EXE 生成使用 jpackage 工具（Java 14+自带）
+        请参考项目根目录的 build-exe.bat 脚本
+      -->
 
     </plugins>
   </build>
