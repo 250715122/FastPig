@@ -31,6 +31,12 @@ error.txt
 # 打包生成的可执行文件目录
 FastPig/
 
+# 压缩包
+*.zip
+*.rar
+*.7z
+*.tar.gz
+
 # 数据库文件
 *.db
 *.db-journal

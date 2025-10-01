@@ -3,6 +3,8 @@ package com.gt;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,6 +26,7 @@ import org.scilab.forge.jlatexmath.TeXIcon;
 
 public class UnifiedNoteAppFrame extends JFrame {
     private final NoteRepository repository;
+    private TrayIcon trayIcon; // 系统托盘图标
 
     // 首行承载“快捷命令 空格 描述”，不再使用独立的输入框
     private final JPopupMenu suggestPopup = new JPopupMenu();
@@ -63,14 +66,15 @@ public class UnifiedNoteAppFrame extends JFrame {
         setSize(1100, 720);
         setLocationRelativeTo(null);
         
-        // 添加窗口关闭监听器，确保关闭时触发同步
-        addWindowListener(new java.awt.event.WindowAdapter() {
+        // 初始化系统托盘
+        initSystemTray();
+        
+        // 添加窗口关闭监听器：点击 X 时最小化到托盘，而不是退出
+        addWindowListener(new WindowAdapter() {
             @Override
-            public void windowClosing(java.awt.event.WindowEvent e) {
-                System.out.println("[关闭] 正在同步数据库到云端...");
-                DbSyncService.getInstance().syncToCloudSilently();
-                System.out.println("[关闭] 同步完成，退出程序");
-                System.exit(0);
+            public void windowClosing(WindowEvent e) {
+                // 隐藏窗口到托盘
+                hideToTray();
             }
         });
 
@@ -774,6 +778,137 @@ public class UnifiedNoteAppFrame extends JFrame {
         String desc = f[2] == null? "" : f[2].trim();
         if (key.isEmpty() || key.contains(" ")) return false;
         return !desc.isEmpty();
+    }
+
+    /**
+     * 初始化系统托盘
+     */
+    private void initSystemTray() {
+        // 检查系统是否支持托盘
+        if (!SystemTray.isSupported()) {
+            System.out.println("[托盘] 系统不支持托盘功能");
+            return;
+        }
+
+        try {
+            SystemTray tray = SystemTray.getSystemTray();
+            
+            // 创建托盘图标（使用简单的图标）
+            Image trayImage = createTrayIcon();
+            
+            // 创建弹出菜单
+            PopupMenu popup = new PopupMenu();
+            
+            // 显示主窗口
+            MenuItem showItem = new MenuItem("显示主窗口");
+            showItem.addActionListener(e -> showFromTray());
+            popup.add(showItem);
+            
+            popup.addSeparator();
+            
+            // 退出程序
+            MenuItem exitItem = new MenuItem("退出程序");
+            exitItem.addActionListener(e -> exitApplication());
+            popup.add(exitItem);
+            
+            // 创建托盘图标
+            trayIcon = new TrayIcon(trayImage, "FastPig - 快捷命令助手", popup);
+            trayIcon.setImageAutoSize(true);
+            
+            // 双击托盘图标显示窗口
+            trayIcon.addActionListener(e -> showFromTray());
+            
+            // 添加到系统托盘
+            tray.add(trayIcon);
+            
+            System.out.println("[托盘] 系统托盘初始化成功");
+            
+        } catch (Exception e) {
+            System.err.println("[托盘] 初始化失败: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 创建托盘图标
+     */
+    private Image createTrayIcon() {
+        // 创建一个简单的 16x16 图标（蓝色背景 + 白色 "F"）
+        int size = 16;
+        BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = image.createGraphics();
+        
+        // 抗锯齿
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        
+        // 绘制蓝色圆形背景
+        g.setColor(new Color(0, 120, 215));
+        g.fillOval(0, 0, size, size);
+        
+        // 绘制白色 "F" 字母
+        g.setColor(Color.WHITE);
+        g.setFont(new Font("Arial", Font.BOLD, 12));
+        FontMetrics fm = g.getFontMetrics();
+        String text = "F";
+        int x = (size - fm.stringWidth(text)) / 2;
+        int y = ((size - fm.getHeight()) / 2) + fm.getAscent();
+        g.drawString(text, x, y);
+        
+        g.dispose();
+        return image;
+    }
+
+    /**
+     * 隐藏窗口到托盘
+     */
+    private void hideToTray() {
+        if (trayIcon != null) {
+            setVisible(false);
+            // 可选：显示托盘提示
+            trayIcon.displayMessage(
+                "FastPig 已最小化到托盘", 
+                "双击托盘图标或右键选择 [显示主窗口] 可恢复窗口",
+                TrayIcon.MessageType.INFO
+            );
+            System.out.println("[托盘] 窗口已隐藏到托盘");
+        } else {
+            // 如果托盘不可用，则最小化窗口
+            setState(Frame.ICONIFIED);
+        }
+    }
+
+    /**
+     * 从托盘恢复窗口
+     */
+    private void showFromTray() {
+        setVisible(true);
+        setState(Frame.NORMAL);
+        toFront();
+        requestFocus();
+        System.out.println("[托盘] 从托盘恢复窗口");
+    }
+
+    /**
+     * 退出应用程序（同步数据后退出）
+     */
+    private void exitApplication() {
+        System.out.println("[退出] 正在同步数据库到云端...");
+        DbSyncService.getInstance().syncToCloudSilently();
+        System.out.println("[退出] 同步完成，退出程序");
+        
+        // 移除托盘图标
+        if (trayIcon != null) {
+            SystemTray.getSystemTray().remove(trayIcon);
+        }
+        
+        System.exit(0);
+    }
+
+    /**
+     * 获取退出方法的引用（供外部调用）
+     */
+    public void performExit() {
+        exitApplication();
     }
 }
 
