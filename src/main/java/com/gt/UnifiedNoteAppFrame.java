@@ -818,15 +818,15 @@ public class UnifiedNoteAppFrame extends JFrame {
             // 创建弹出菜单
             PopupMenu popup = new PopupMenu();
             
-            // 显示主窗口
-            MenuItem showItem = new MenuItem("显示主窗口");
+            // 显示主窗口（使用英文避免乱码）
+            MenuItem showItem = new MenuItem("Show Window");
             showItem.addActionListener(e -> showFromTray());
             popup.add(showItem);
             
             popup.addSeparator();
             
-            // 退出程序
-            MenuItem exitItem = new MenuItem("退出程序");
+            // 退出程序（使用英文避免乱码）
+            MenuItem exitItem = new MenuItem("Exit");
             exitItem.addActionListener(e -> exitApplication());
             popup.add(exitItem);
             
@@ -898,8 +898,8 @@ public class UnifiedNoteAppFrame extends JFrame {
             setVisible(false);
             // 可选：显示托盘提示
             trayIcon.displayMessage(
-                "FastPig 已最小化到托盘", 
-                "双击托盘图标或右键选择 [显示主窗口] 可恢复窗口",
+                "FastPig Minimized", 
+                "Double-click tray icon or right-click [Show Window] to restore",
                 TrayIcon.MessageType.INFO
             );
             System.out.println("[托盘] 窗口已隐藏到托盘");
