@@ -788,27 +788,17 @@ public class UnifiedNoteAppFrame extends JFrame {
      */
     private void setWindowIcon() {
         try {
-            // 尝试从资源文件加载图标
-            java.io.InputStream iconStream = getClass().getResourceAsStream("/icons/fastpig-32.png");
+            // 从资源文件加载图标
+            java.io.InputStream iconStream = getClass().getResourceAsStream("/icons/FastPig.png");
             if (iconStream != null) {
                 BufferedImage iconImage = javax.imageio.ImageIO.read(iconStream);
                 setIconImage(iconImage);
                 System.out.println("[图标] 窗口图标加载成功");
             } else {
-                // 如果资源文件不存在，使用代码生成的图标
-                Image icon = createTrayIcon();
-                setIconImage(icon);
-                System.out.println("[图标] 使用默认生成的图标");
+                System.err.println("[图标] 未找到图标文件: /icons/FastPig.png");
             }
         } catch (Exception e) {
             System.err.println("[图标] 加载窗口图标失败: " + e.getMessage());
-            // 使用默认生成的图标作为后备
-            try {
-                Image icon = createTrayIcon();
-                setIconImage(icon);
-            } catch (Exception ex) {
-                System.err.println("[图标] 生成默认图标失败: " + ex.getMessage());
-            }
         }
     }
 
@@ -865,19 +855,33 @@ public class UnifiedNoteAppFrame extends JFrame {
      * 创建托盘图标
      */
     private Image createTrayIcon() {
-        // 创建一个简单的 16x16 图标（蓝色背景 + 白色 "F"）
+        try {
+            // 尝试从资源文件加载用户的 logo
+            java.io.InputStream iconStream = getClass().getResourceAsStream("/icons/FastPig.png");
+            if (iconStream != null) {
+                BufferedImage originalImage = javax.imageio.ImageIO.read(iconStream);
+                // 缩放到 16x16 用于托盘
+                BufferedImage scaledImage = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+                Graphics2D g = scaledImage.createGraphics();
+                g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.drawImage(originalImage, 0, 0, 16, 16, null);
+                g.dispose();
+                System.out.println("[托盘] 托盘图标加载成功");
+                return scaledImage;
+            }
+        } catch (Exception e) {
+            System.err.println("[托盘] 加载图标失败，使用默认图标: " + e.getMessage());
+        }
+        
+        // 后备方案：创建简单的默认图标
         int size = 16;
         BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = image.createGraphics();
-        
-        // 抗锯齿
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        
-        // 绘制蓝色圆形背景
         g.setColor(new Color(0, 120, 215));
         g.fillOval(0, 0, size, size);
-        
-        // 绘制白色 "F" 字母
         g.setColor(Color.WHITE);
         g.setFont(new Font("Arial", Font.BOLD, 12));
         FontMetrics fm = g.getFontMetrics();
@@ -885,7 +889,6 @@ public class UnifiedNoteAppFrame extends JFrame {
         int x = (size - fm.stringWidth(text)) / 2;
         int y = ((size - fm.getHeight()) / 2) + fm.getAscent();
         g.drawString(text, x, y);
-        
         g.dispose();
         return image;
     }
