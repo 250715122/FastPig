@@ -117,7 +117,7 @@ nutstore.sync.path=FastPig/fastpig.db
 ```
 FastPig/
 ├── src/main/java/com/gt/
-│   ├── ModernSwingTest.java          # 主程序入口
+│   ├── FastPigApplication.java       # 主程序入口
 │   ├── UnifiedNoteAppFrame.java      # 统一笔记界面
 │   ├── NoteRepository.java           # 数据库操作
 │   ├── DbSyncService.java            # 数据库同步服务

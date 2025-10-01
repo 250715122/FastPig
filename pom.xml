@@ -170,7 +170,7 @@
           </descriptorRefs>
           <archive>
             <manifest>
-              <mainClass>com.gt.ModernSwingTest</mainClass>
+              <mainClass>com.gt.FastPigApplication</mainClass>
             </manifest>
           </archive>
         </configuration>

@@ -59,7 +59,7 @@ public class SimpleSwingTest extends JFrame {
 				if(e.getKeyCode()==KeyEvent.VK_SPACE){
 					
 					try {
-						String content = CodeReplace.search(textArea.getText());
+						String content = SnippetSearchUtil.search(textArea.getText());
 						if(content != null && content.trim().length()>0){
 							textArea.setText(content);
 						}else{

@@ -8,7 +8,11 @@ import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.List;
 
-public class CodeReplace {
+/**
+ * 代码片段搜索工具类
+ * 用于从资源文件中搜索和检索代码片段
+ */
+public class SnippetSearchUtil {
 
 	public static void main(String[] args) throws IOException{
 

@@ -62,7 +62,7 @@ public class SwingTest extends JFrame {
 				if(e.getKeyCode()==KeyEvent.VK_SPACE){
 					
 					try {
-						String content = CodeReplace.search(textArea.getText());
+						String content = SnippetSearchUtil.search(textArea.getText());
 						if(content.trim().length()>0){
 							textArea.setText(content);
 						}else{
@@ -141,7 +141,7 @@ public class SwingTest extends JFrame {
         } 
         
         //增加文本提示 - 获取所有可用的命令提示
-        ArrayList<String> items = CodeReplace.searchHelper("");
+        ArrayList<String> items = SnippetSearchUtil.searchHelper("");
         setupAutoComplete(textArea, items);
         
         textArea.setEditable(true);
@@ -177,7 +177,7 @@ public class SwingTest extends JFrame {
                 	  }else{
                           //txtInput.setText(cbInput.getSelectedItem().toString().split(":")[0].trim());
                           try {
-							txtInput.setText(CodeReplace.searchAccurate(cbInput.getSelectedItem().toString().split(":")[0].trim()));
+							txtInput.setText(SnippetSearchUtil.searchAccurate(cbInput.getSelectedItem().toString().split(":")[0].trim()));
 						} catch (IOException e1) {
 							e1.printStackTrace();
 						}
@@ -212,7 +212,7 @@ public class SwingTest extends JFrame {
                     String input = txtInput.getText();
                     if (!input.trim().isEmpty()) {
                         // 动态获取匹配的命令提示
-                        ArrayList<String> currentItems = CodeReplace.searchHelper(input);
+                        ArrayList<String> currentItems = SnippetSearchUtil.searchHelper(input);
                         for (String item : currentItems) {
                             if(item.trim().toLowerCase().indexOf(input.trim().toLowerCase())!=-1){
                                 model.addElement(item.trim());

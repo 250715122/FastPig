@@ -33,12 +33,13 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
- * 现代化的代码助手GUI - 使用混合热键管理器
+ * FastPig 应用程序主类
+ * 快捷命令笔记管理工具，支持 Markdown、LaTeX 和云端同步
  */
-public class ModernSwingTest extends JFrame {
+public class FastPigApplication extends JFrame {
 
     private static final long serialVersionUID = 1L;
-    private static final Logger logger = LogManager.getLogger(ModernSwingTest.class);
+    private static final Logger logger = LogManager.getLogger(FastPigApplication.class);
     
     private HotKeyManager hotKeyManager;
     private JTextArea textArea;
@@ -49,7 +50,7 @@ public class ModernSwingTest extends JFrame {
         logger.info("工作目录: {}", System.getProperty("user.dir"));
         logger.info("========================================");
         
-        System.out.println("启动现代化代码助手...");
+        System.out.println("启动 FastPig 应用程序...");
         
         // 启动前：尝试从坚果云目录拉取最新数据库
         logger.info("开始同步数据库...");
@@ -60,7 +61,7 @@ public class ModernSwingTest extends JFrame {
         UnifiedNoteAppFrame unified = new UnifiedNoteAppFrame(repo);
         unified.setVisible(true);
         // 同时初始化热键（Alt+S 可再次呼出界面）
-        final ModernSwingTest app = new ModernSwingTest();
+        final FastPigApplication app = new FastPigApplication();
         app.initializeGUI();
         app.initializeHotKeys();
     }
@@ -69,7 +70,7 @@ public class ModernSwingTest extends JFrame {
      * 初始化GUI界面
      */
     private void initializeGUI() throws IOException {
-        setTitle("代码助手 - 现代版");
+        setTitle("FastPig - 快捷命令助手");
         setSize(800, 600);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
@@ -109,10 +110,10 @@ public class ModernSwingTest extends JFrame {
             public void keyTyped(KeyEvent e) {}
             public void keyReleased(KeyEvent e) {}
             
-            public void keyPressed(KeyEvent e) {
-                if(e.getKeyCode()==KeyEvent.VK_SPACE){
-                    try {
-                        String content = CodeReplace.search(textArea.getText());
+                public void keyPressed(KeyEvent e) {
+                    if(e.getKeyCode()==KeyEvent.VK_SPACE){
+                        try {
+                            String content = SnippetSearchUtil.search(textArea.getText());
                         if(content != null && content.trim().length()>0){
                             textArea.setText(content);
                         }else{
@@ -127,7 +128,7 @@ public class ModernSwingTest extends JFrame {
         
         // 设置自动补全
         try {
-            ArrayList<String> items = CodeReplace.searchHelper("");
+            ArrayList<String> items = SnippetSearchUtil.searchHelper("");
             setupAutoComplete(textArea, items);
         } catch (IOException e) {
             System.err.println("初始化自动补全失败: " + e.getMessage());
@@ -193,7 +194,7 @@ public class ModernSwingTest extends JFrame {
                         if (selectedValue != null && !selectedValue.isEmpty()) {
                             try {
                                 String keyword = selectedValue.split(":")[0].trim();
-                                txtInput.setText(CodeReplace.searchAccurate(keyword));
+							txtInput.setText(SnippetSearchUtil.searchAccurate(keyword));
                             } catch (IOException e1) {
                                 handleException(e1);
                             }
@@ -275,7 +276,7 @@ public class ModernSwingTest extends JFrame {
                     model.removeAllElements();
                     
                     // 动态获取匹配的命令提示
-                    ArrayList<String> currentItems = CodeReplace.searchHelper(input);
+                        ArrayList<String> currentItems = SnippetSearchUtil.searchHelper(input);
                     int addedCount = 0;
 
                     for (String item : currentItems) {

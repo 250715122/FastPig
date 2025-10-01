@@ -33,7 +33,7 @@ if not %errorlevel%==0 (
 
 echo.
 echo 启动程序...
-java -cp "target/classes;target/dependency/*" com.gt.ModernSwingTest
+java -cp "target/classes;target/dependency/*" com.gt.FastPigApplication
 
 echo.
 echo 程序已退出，执行一次数据同步到坚果云，完成后退出...

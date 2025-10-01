@@ -59,7 +59,7 @@ call "%JPACKAGE%" ^
     --input target ^
     --name FastPig ^
     --main-jar FastPig-0.0.1-SNAPSHOT-jar-with-dependencies.jar ^
-    --main-class com.gt.ModernSwingTest ^
+    --main-class com.gt.FastPigApplication ^
     --type app-image ^
     --dest . ^
     --verbose
