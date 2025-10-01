@@ -248,16 +248,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                 bodyArea.replaceSelection("$$\n\n$$\n");
             }
         });
-        // Ctrl+Alt+S 同步数据库到坚果云
-        KeyStroke ksCtrlAltS = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_S, java.awt.event.InputEvent.CTRL_DOWN_MASK | java.awt.event.InputEvent.ALT_DOWN_MASK);
-        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlAltS, "syncDbToCloud");
-        root.getActionMap().put("syncDbToCloud", new AbstractAction(){
-            @Override public void actionPerformed(ActionEvent e){
-                statusLeft.setText("正在同步到云端…");
-                boolean ok = DbSyncService.getInstance().syncToCloud();
-                statusLeft.setText(ok? "已同步到云端" : "同步失败");
-            }
-        });
+        // Alt+S 同步数据库到云端已改为全局热键，在 HotKeyManager 中处理
         // Esc 关闭补全
         KeyStroke ksEsc = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0);
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksEsc, "hideSuggest");

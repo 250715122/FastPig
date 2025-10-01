@@ -33,7 +33,7 @@ public class HotKeyManager {
     private static final int HOTKEY_SHOW_MAX = 2;
     private static final int HOTKEY_MINIMIZE = 3;
     private static final int HOTKEY_EXIT = 4;
-    private static final int HOTKEY_EDITOR = 5; // Alt+S 打开编辑器
+    private static final int HOTKEY_SYNC = 5; // Alt+S 同步到云端
     
     public HotKeyManager(JFrame frame, JTextArea textArea) {
         this.targetFrame = frame;
@@ -128,7 +128,7 @@ public class HotKeyManager {
             JIntellitype.getInstance().registerHotKey(HOTKEY_SHOW_MAX, JIntellitype.MOD_ALT, (int)'M');
             JIntellitype.getInstance().registerHotKey(HOTKEY_MINIMIZE, JIntellitype.MOD_ALT, (int)'L');
             JIntellitype.getInstance().registerHotKey(HOTKEY_EXIT, JIntellitype.MOD_ALT, (int)'Q');
-            JIntellitype.getInstance().registerHotKey(HOTKEY_EDITOR, JIntellitype.MOD_ALT, (int)'S');
+            JIntellitype.getInstance().registerHotKey(HOTKEY_SYNC, JIntellitype.MOD_ALT, (int)'S');
             
             // 添加热键监听器
             JIntellitype.getInstance().addHotKeyListener(new HotkeyListener() {
@@ -152,8 +152,9 @@ public class HotKeyManager {
      * 处理JNativeHook按键事件
      */
     private void handleJNativeHookKeyPress(NativeKeyEvent e) {
-        // 检查Alt键是否按下
+        // 检查Alt键和Ctrl键是否按下
         boolean altPressed = (e.getModifiers() & NativeKeyEvent.ALT_MASK) != 0;
+        boolean ctrlPressed = (e.getModifiers() & NativeKeyEvent.CTRL_MASK) != 0;
         
         if (altPressed) {
             System.out.println("检测到Alt组合键: Alt + " + NativeKeyEvent.getKeyText(e.getKeyCode()));
@@ -176,8 +177,8 @@ public class HotKeyManager {
                     exitApplication();
                     break;
                 case NativeKeyEvent.VC_S:
-                    System.out.println("执行Alt+S: 打开编辑器");
-                    openEditor();
+                    System.out.println("执行Alt+S: 同步数据库到云端");
+                    syncToCloud();
                     break;
                 // Alt+P 不作为全局热键处理（预览仅在应用内快捷键生效）
                 default:
@@ -204,20 +205,27 @@ public class HotKeyManager {
             case HOTKEY_EXIT:
                 exitApplication();
                 break;
-            case HOTKEY_EDITOR:
-                openEditor();
+            case HOTKEY_SYNC:
+                syncToCloud();
                 break;
             // 预览仅在应用内快捷键处理，这里不做全局处理
         }
     }
 
-    private void openEditor() {
+    /**
+     * 同步数据库到云端
+     */
+    private void syncToCloud() {
         try {
-            NoteRepository repo = new NoteRepository(System.getProperty("user.dir") + "/fastpig.db");
-            UnifiedNoteAppFrame frame = new UnifiedNoteAppFrame(repo);
-            frame.setVisible(true);
+            System.out.println("[热键] 正在同步数据库到云端...");
+            boolean ok = DbSyncService.getInstance().syncToCloud();
+            if (ok) {
+                System.out.println("[热键] 同步成功");
+            } else {
+                System.out.println("[热键] 同步失败");
+            }
         } catch (Exception ex) {
-            System.err.println("打开编辑器失败: " + ex.getMessage());
+            System.err.println("[热键] 同步失败: " + ex.getMessage());
         }
     }
 
@@ -340,7 +348,7 @@ public class HotKeyManager {
         System.out.println("Alt + M: 最大化窗口");
         System.out.println("Alt + L: 最小化窗口");
         System.out.println("Alt + Q: 退出程序");
-        System.out.println("Alt + S: 打开编辑器");
+        System.out.println("Alt + S: 同步数据库到云端");
         System.out.println("========================");
     }
     
@@ -353,7 +361,7 @@ public class HotKeyManager {
         System.out.println("Alt + M: 最大化窗口");
         System.out.println("Alt + L: 最小化窗口");
         System.out.println("Alt + Q: 退出程序");
-        System.out.println("Alt + S: 打开编辑器");
+        System.out.println("Alt + S: 同步数据库到云端");
         System.out.println("=========================");
     }
 }
