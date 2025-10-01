@@ -193,6 +193,37 @@ public class NutstoreWebDAVSync {
         }
     }
     
+    /**
+     * 从云端强制下载数据库（Alt+U 触发）
+     * 无论本地是否最新，都会覆盖本地文件
+     */
+    public boolean syncFromCloud() {
+        if (!enabled) {
+            System.out.println("[WebDAV] 云端同步未启用");
+            return false;
+        }
+        
+        try {
+            Sardine sardine = SardineFactory.begin(username, password);
+            
+            // 检查云端文件是否存在
+            if (!sardine.exists(webdavUrl)) {
+                System.out.println("[WebDAV] 云端数据库不存在，无法下载");
+                return false;
+            }
+            
+            // 强制下载，覆盖本地
+            downloadFromCloud(sardine);
+            System.out.println("[WebDAV] 已从云端下载并覆盖本地数据库");
+            return true;
+            
+        } catch (Exception e) {
+            System.err.println("[WebDAV] 从云端下载失败: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
+    }
+    
     private void downloadFromCloud(Sardine sardine) throws Exception {
         try (InputStream in = sardine.get(webdavUrl);
              FileOutputStream out = new FileOutputStream(localDb.toFile())) {

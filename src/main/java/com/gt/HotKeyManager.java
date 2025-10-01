@@ -34,6 +34,7 @@ public class HotKeyManager {
     private static final int HOTKEY_MINIMIZE = 3;
     private static final int HOTKEY_EXIT = 4;
     private static final int HOTKEY_SYNC = 5; // Alt+S 同步到云端
+    private static final int HOTKEY_PULL = 6; // Alt+U 从云端下载
     
     public HotKeyManager(JFrame frame, JTextArea textArea) {
         this.targetFrame = frame;
@@ -129,6 +130,7 @@ public class HotKeyManager {
             JIntellitype.getInstance().registerHotKey(HOTKEY_MINIMIZE, JIntellitype.MOD_ALT, (int)'L');
             JIntellitype.getInstance().registerHotKey(HOTKEY_EXIT, JIntellitype.MOD_ALT, (int)'Q');
             JIntellitype.getInstance().registerHotKey(HOTKEY_SYNC, JIntellitype.MOD_ALT, (int)'S');
+            JIntellitype.getInstance().registerHotKey(HOTKEY_PULL, JIntellitype.MOD_ALT, (int)'U');
             
             // 添加热键监听器
             JIntellitype.getInstance().addHotKeyListener(new HotkeyListener() {
@@ -180,6 +182,10 @@ public class HotKeyManager {
                     System.out.println("执行Alt+S: 同步数据库到云端");
                     syncToCloud();
                     break;
+                case NativeKeyEvent.VC_U:
+                    System.out.println("执行Alt+U: 从云端下载数据库");
+                    pullFromCloud();
+                    break;
                 // Alt+P 不作为全局热键处理（预览仅在应用内快捷键生效）
                 default:
                     System.out.println("未处理的Alt组合键: " + NativeKeyEvent.getKeyText(e.getKeyCode()));
@@ -208,12 +214,15 @@ public class HotKeyManager {
             case HOTKEY_SYNC:
                 syncToCloud();
                 break;
+            case HOTKEY_PULL:
+                pullFromCloud();
+                break;
             // 预览仅在应用内快捷键处理，这里不做全局处理
         }
     }
 
     /**
-     * 同步数据库到云端
+     * 同步数据库到云端（上传）
      */
     private void syncToCloud() {
         // 获取当前活动的编辑器窗口
@@ -224,7 +233,7 @@ public class HotKeyManager {
             
             // 更新状态栏
             if (activeFrame != null) {
-                activeFrame.updateStatusLeft("正在同步到云端…");
+                activeFrame.updateStatusLeft("正在上传到云端…");
             }
             
             // 执行同步
@@ -232,20 +241,65 @@ public class HotKeyManager {
             
             // 更新结果
             if (ok) {
-                System.out.println("[热键] 同步成功");
+                System.out.println("[热键] 上传成功");
                 if (activeFrame != null) {
-                    activeFrame.updateStatusLeft("云端同步成功");
+                    activeFrame.updateStatusLeft("上传云端成功");
                 }
             } else {
-                System.out.println("[热键] 同步失败");
+                System.out.println("[热键] 上传失败");
                 if (activeFrame != null) {
-                    activeFrame.updateStatusLeft("云端同步失败");
+                    activeFrame.updateStatusLeft("上传云端失败");
                 }
             }
         } catch (Exception ex) {
-            System.err.println("[热键] 同步失败: " + ex.getMessage());
+            System.err.println("[热键] 上传失败: " + ex.getMessage());
             if (activeFrame != null) {
-                activeFrame.updateStatusLeft("云端同步失败: " + ex.getMessage());
+                activeFrame.updateStatusLeft("上传云端失败: " + ex.getMessage());
+            }
+        }
+    }
+
+    /**
+     * 从云端下载数据库（下载）
+     */
+    private void pullFromCloud() {
+        // 获取当前活动的编辑器窗口
+        UnifiedNoteAppFrame activeFrame = UnifiedNoteAppFrame.getActiveInstance();
+        
+        try {
+            System.out.println("[热键] 正在从云端下载数据库...");
+            
+            // 更新状态栏
+            if (activeFrame != null) {
+                activeFrame.updateStatusLeft("正在从云端下载…");
+            }
+            
+            // 执行下载
+            boolean ok = DbSyncService.getInstance().syncFromCloud();
+            
+            // 更新结果
+            if (ok) {
+                System.out.println("[热键] 下载成功");
+                if (activeFrame != null) {
+                    activeFrame.updateStatusLeft("云端下载成功");
+                    // 提示：需要重启应用才能看到云端数据
+                    javax.swing.JOptionPane.showMessageDialog(
+                        activeFrame,
+                        "数据库已从云端下载并覆盖本地。\n请重启应用以加载云端数据。",
+                        "下载成功",
+                        javax.swing.JOptionPane.INFORMATION_MESSAGE
+                    );
+                }
+            } else {
+                System.out.println("[热键] 下载失败");
+                if (activeFrame != null) {
+                    activeFrame.updateStatusLeft("云端下载失败");
+                }
+            }
+        } catch (Exception ex) {
+            System.err.println("[热键] 下载失败: " + ex.getMessage());
+            if (activeFrame != null) {
+                activeFrame.updateStatusLeft("云端下载失败: " + ex.getMessage());
             }
         }
     }
@@ -369,7 +423,8 @@ public class HotKeyManager {
         System.out.println("Alt + M: 最大化窗口");
         System.out.println("Alt + L: 最小化窗口");
         System.out.println("Alt + Q: 退出程序");
-        System.out.println("Alt + S: 同步数据库到云端");
+        System.out.println("Alt + S: 上传数据库到云端");
+        System.out.println("Alt + U: 从云端下载数据库");
         System.out.println("========================");
     }
     
@@ -382,7 +437,8 @@ public class HotKeyManager {
         System.out.println("Alt + M: 最大化窗口");
         System.out.println("Alt + L: 最小化窗口");
         System.out.println("Alt + Q: 退出程序");
-        System.out.println("Alt + S: 同步数据库到云端");
+        System.out.println("Alt + S: 上传数据库到云端");
+        System.out.println("Alt + U: 从云端下载数据库");
         System.out.println("=========================");
     }
 }

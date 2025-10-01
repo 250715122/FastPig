@@ -133,6 +133,20 @@ public class DbSyncService {
         }
     }
 
+    /**
+     * 从云端下载策略（Alt+U 触发）：
+     * 强制从坚果云 WebDAV 下载，覆盖本地数据库
+     */
+    public boolean syncFromCloud() {
+        // 仅支持 WebDAV 同步
+        if (webdavSync.isEnabled()) {
+            return webdavSync.syncFromCloud();
+        } else {
+            System.out.println("[DbSync] 云端同步未启用，无法下载");
+            return false;
+        }
+    }
+
     private void ensureCloudDir() throws IOException {
         if (!Files.exists(cloudDir)) {
             Files.createDirectories(cloudDir);
