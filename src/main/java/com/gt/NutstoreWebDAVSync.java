@@ -146,37 +146,61 @@ public class NutstoreWebDAVSync {
     }
     
     /**
-     * 上传到坚果云（Ctrl+Alt+S 或关闭时）
+     * 上传到坚果云（Alt+S 触发）
      */
     public boolean syncToCloud() {
-        if (!enabled) return false;
+        System.out.println(">>> [WebDAV] syncToCloud() 被调用");
+        System.out.println(">>> [WebDAV] 启用状态: " + enabled);
+        System.out.println(">>> [WebDAV] 用户名: " + username);
+        System.out.println(">>> [WebDAV] WebDAV URL: " + webdavUrl);
+        System.out.println(">>> [WebDAV] 本地数据库: " + localDb);
+        
+        if (!enabled) {
+            System.out.println(">>> [WebDAV] ❌ WebDAV 未启用");
+            return false;
+        }
         
         try {
             if (!Files.exists(localDb)) {
-                System.out.println("[WebDAV] 本地数据库不存在，跳过上传");
+                System.out.println(">>> [WebDAV] ❌ 本地数据库不存在: " + localDb);
                 return false;
             }
             
+            long fileSize = Files.size(localDb);
+            System.out.println(">>> [WebDAV] 本地数据库大小: " + fileSize + " bytes");
+            
+            System.out.println(">>> [WebDAV] 创建 Sardine 客户端...");
             Sardine sardine = SardineFactory.begin(username, password);
+            System.out.println(">>> [WebDAV] Sardine 客户端创建成功");
             
             // 确保父目录存在（捕获异常，如果目录已存在会返回错误）
             String parentUrl = webdavUrl.substring(0, webdavUrl.lastIndexOf('/') + 1);
+            System.out.println(">>> [WebDAV] 父目录 URL: " + parentUrl);
+            
             try {
-                if (!sardine.exists(parentUrl)) {
+                System.out.println(">>> [WebDAV] 检查父目录是否存在...");
+                boolean parentExists = sardine.exists(parentUrl);
+                System.out.println(">>> [WebDAV] 父目录存在: " + parentExists);
+                
+                if (!parentExists) {
+                    System.out.println(">>> [WebDAV] 创建父目录...");
                     sardine.createDirectory(parentUrl);
-                    System.out.println("[WebDAV] 已创建云端目录: " + parentUrl);
+                    System.out.println(">>> [WebDAV] ✅ 已创建云端目录: " + parentUrl);
                 }
             } catch (Exception e) {
                 // 目录可能已存在或无权限检查，直接尝试上传
-                System.out.println("[WebDAV] 跳过目录检查，直接上传");
+                System.out.println(">>> [WebDAV] ⚠️ 目录检查异常: " + e.getMessage());
+                System.out.println(">>> [WebDAV] 跳过目录检查，直接尝试上传");
             }
             
+            System.out.println(">>> [WebDAV] 开始上传文件到: " + webdavUrl);
             uploadToCloud(sardine);
-            System.out.println("[WebDAV] 已将本地数据库同步到坚果云");
+            System.out.println(">>> [WebDAV] ✅ 已将本地数据库同步到坚果云");
             return true;
             
         } catch (Exception e) {
-            System.err.println("[WebDAV] 上传失败: " + e.getMessage());
+            System.err.println(">>> [WebDAV] ❌ 上传失败: " + e.getMessage());
+            System.err.println(">>> [WebDAV] 异常类型: " + e.getClass().getName());
             e.printStackTrace();
             return false;
         }
@@ -198,27 +222,42 @@ public class NutstoreWebDAVSync {
      * 无论本地是否最新，都会覆盖本地文件
      */
     public boolean syncFromCloud() {
+        System.out.println(">>> [WebDAV] syncFromCloud() 被调用");
+        System.out.println(">>> [WebDAV] 启用状态: " + enabled);
+        System.out.println(">>> [WebDAV] 用户名: " + username);
+        System.out.println(">>> [WebDAV] WebDAV URL: " + webdavUrl);
+        System.out.println(">>> [WebDAV] 本地数据库: " + localDb);
+        
         if (!enabled) {
-            System.out.println("[WebDAV] 云端同步未启用");
+            System.out.println(">>> [WebDAV] ❌ 云端同步未启用");
             return false;
         }
         
         try {
+            System.out.println(">>> [WebDAV] 创建 Sardine 客户端...");
             Sardine sardine = SardineFactory.begin(username, password);
+            System.out.println(">>> [WebDAV] Sardine 客户端创建成功");
             
             // 检查云端文件是否存在
-            if (!sardine.exists(webdavUrl)) {
-                System.out.println("[WebDAV] 云端数据库不存在，无法下载");
+            System.out.println(">>> [WebDAV] 检查云端文件是否存在: " + webdavUrl);
+            boolean cloudExists = sardine.exists(webdavUrl);
+            System.out.println(">>> [WebDAV] 云端文件存在: " + cloudExists);
+            
+            if (!cloudExists) {
+                System.out.println(">>> [WebDAV] ❌ 云端数据库不存在，无法下载");
                 return false;
             }
             
             // 强制下载，覆盖本地
+            System.out.println(">>> [WebDAV] 开始从云端下载文件...");
             downloadFromCloud(sardine);
-            System.out.println("[WebDAV] 已从云端下载并覆盖本地数据库");
+            System.out.println(">>> [WebDAV] ✅ 已从云端下载并覆盖本地数据库");
+            System.out.println(">>> [WebDAV] 本地文件大小: " + Files.size(localDb) + " bytes");
             return true;
             
         } catch (Exception e) {
-            System.err.println("[WebDAV] 从云端下载失败: " + e.getMessage());
+            System.err.println(">>> [WebDAV] ❌ 从云端下载失败: " + e.getMessage());
+            System.err.println(">>> [WebDAV] 异常类型: " + e.getClass().getName());
             e.printStackTrace();
             return false;
         }

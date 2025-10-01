@@ -179,11 +179,17 @@ public class HotKeyManager {
                     exitApplication();
                     break;
                 case NativeKeyEvent.VC_S:
-                    System.out.println("执行Alt+S: 同步数据库到云端");
+                    System.out.println("========================================");
+                    System.out.println("[热键捕获] 检测到 Alt+S 按键");
+                    System.out.println("[热键捕获] 时间: " + new java.util.Date());
+                    System.out.println("========================================");
                     syncToCloud();
                     break;
                 case NativeKeyEvent.VC_U:
-                    System.out.println("执行Alt+U: 从云端下载数据库");
+                    System.out.println("========================================");
+                    System.out.println("[热键捕获] 检测到 Alt+U 按键");
+                    System.out.println("[热键捕获] 时间: " + new java.util.Date());
+                    System.out.println("========================================");
                     pullFromCloud();
                     break;
                 // Alt+P 不作为全局热键处理（预览仅在应用内快捷键生效）
@@ -225,61 +231,89 @@ public class HotKeyManager {
      * 同步数据库到云端（上传）
      */
     private void syncToCloud() {
+        System.out.println(">>> [Alt+S 上传流程] 开始执行");
+        
         // 获取当前活动的编辑器窗口
         UnifiedNoteAppFrame activeFrame = UnifiedNoteAppFrame.getActiveInstance();
+        System.out.println(">>> [Alt+S 上传流程] 活动窗口: " + (activeFrame != null ? "已找到" : "未找到"));
         
         try {
-            System.out.println("[热键] 正在同步数据库到云端...");
+            System.out.println(">>> [Alt+S 上传流程] 准备调用 DbSyncService.syncToCloud()");
             
             // 更新状态栏
             if (activeFrame != null) {
+                System.out.println(">>> [Alt+S 上传流程] 更新状态栏: 正在上传到云端…");
                 activeFrame.updateStatusLeft("正在上传到云端…");
             }
             
             // 执行同步
+            long startTime = System.currentTimeMillis();
+            System.out.println(">>> [Alt+S 上传流程] 开始时间: " + new java.util.Date(startTime));
+            
             boolean ok = DbSyncService.getInstance().syncToCloud();
+            
+            long endTime = System.currentTimeMillis();
+            System.out.println(">>> [Alt+S 上传流程] 结束时间: " + new java.util.Date(endTime));
+            System.out.println(">>> [Alt+S 上传流程] 耗时: " + (endTime - startTime) + "ms");
+            System.out.println(">>> [Alt+S 上传流程] 返回结果: " + (ok ? "成功" : "失败"));
             
             // 更新结果
             if (ok) {
-                System.out.println("[热键] 上传成功");
+                System.out.println(">>> [Alt+S 上传流程] ✅ 上传成功！");
                 if (activeFrame != null) {
                     activeFrame.updateStatusLeft("上传云端成功");
                 }
             } else {
-                System.out.println("[热键] 上传失败");
+                System.out.println(">>> [Alt+S 上传流程] ❌ 上传失败！");
                 if (activeFrame != null) {
                     activeFrame.updateStatusLeft("上传云端失败");
                 }
             }
         } catch (Exception ex) {
-            System.err.println("[热键] 上传失败: " + ex.getMessage());
+            System.err.println(">>> [Alt+S 上传流程] ❌ 异常: " + ex.getMessage());
+            ex.printStackTrace();
             if (activeFrame != null) {
                 activeFrame.updateStatusLeft("上传云端失败: " + ex.getMessage());
             }
         }
+        
+        System.out.println(">>> [Alt+S 上传流程] 流程结束");
+        System.out.println("========================================");
     }
 
     /**
      * 从云端下载数据库（下载）
      */
     private void pullFromCloud() {
+        System.out.println(">>> [Alt+U 下载流程] 开始执行");
+        
         // 获取当前活动的编辑器窗口
         UnifiedNoteAppFrame activeFrame = UnifiedNoteAppFrame.getActiveInstance();
+        System.out.println(">>> [Alt+U 下载流程] 活动窗口: " + (activeFrame != null ? "已找到" : "未找到"));
         
         try {
-            System.out.println("[热键] 正在从云端下载数据库...");
+            System.out.println(">>> [Alt+U 下载流程] 准备调用 DbSyncService.syncFromCloud()");
             
             // 更新状态栏
             if (activeFrame != null) {
+                System.out.println(">>> [Alt+U 下载流程] 更新状态栏: 正在从云端下载…");
                 activeFrame.updateStatusLeft("正在从云端下载…");
             }
             
             // 执行下载
+            long startTime = System.currentTimeMillis();
+            System.out.println(">>> [Alt+U 下载流程] 开始时间: " + new java.util.Date(startTime));
+            
             boolean ok = DbSyncService.getInstance().syncFromCloud();
+            
+            long endTime = System.currentTimeMillis();
+            System.out.println(">>> [Alt+U 下载流程] 结束时间: " + new java.util.Date(endTime));
+            System.out.println(">>> [Alt+U 下载流程] 耗时: " + (endTime - startTime) + "ms");
+            System.out.println(">>> [Alt+U 下载流程] 返回结果: " + (ok ? "成功" : "失败"));
             
             // 更新结果
             if (ok) {
-                System.out.println("[热键] 下载成功");
+                System.out.println(">>> [Alt+U 下载流程] ✅ 下载成功！");
                 if (activeFrame != null) {
                     activeFrame.updateStatusLeft("云端下载成功");
                     // 提示：需要重启应用才能看到云端数据
@@ -291,17 +325,21 @@ public class HotKeyManager {
                     );
                 }
             } else {
-                System.out.println("[热键] 下载失败");
+                System.out.println(">>> [Alt+U 下载流程] ❌ 下载失败！");
                 if (activeFrame != null) {
                     activeFrame.updateStatusLeft("云端下载失败");
                 }
             }
         } catch (Exception ex) {
-            System.err.println("[热键] 下载失败: " + ex.getMessage());
+            System.err.println(">>> [Alt+U 下载流程] ❌ 异常: " + ex.getMessage());
+            ex.printStackTrace();
             if (activeFrame != null) {
                 activeFrame.updateStatusLeft("云端下载失败: " + ex.getMessage());
             }
         }
+        
+        System.out.println(">>> [Alt+U 下载流程] 流程结束");
+        System.out.println("========================================");
     }
 
     // 预览切换的全局热键逻辑已移除，避免与应用内快捷键冲突

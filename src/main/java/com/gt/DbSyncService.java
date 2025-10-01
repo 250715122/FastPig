@@ -98,30 +98,45 @@ public class DbSyncService {
      * 2. 再上传到坚果云 WebDAV（如果配置了）
      */
     public boolean syncToCloud() {
+        System.out.println(">>> [DbSyncService] syncToCloud() 被调用");
+        System.out.println(">>> [DbSyncService] 本地数据库: " + localDb);
+        System.out.println(">>> [DbSyncService] 本地备份启用: " + localBackupEnabled);
+        System.out.println(">>> [DbSyncService] WebDAV 启用: " + webdavSync.isEnabled());
+        
         boolean success = true;
         
         // 1. 本地备份
         if (localBackupEnabled) {
+            System.out.println(">>> [DbSyncService] 开始本地备份...");
             try {
                 if (!Files.exists(localDb)) {
-                    System.out.println("[DbSync] 本地数据库不存在，跳过上传");
+                    System.out.println(">>> [DbSyncService] ❌ 本地数据库不存在: " + localDb);
                     return false;
                 }
+                System.out.println(">>> [DbSyncService] 本地数据库存在，大小: " + Files.size(localDb) + " bytes");
                 ensureCloudDir();
                 Files.copy(localDb, cloudDb, StandardCopyOption.REPLACE_EXISTING);
-                System.out.println("[DbSync] 已保存到本地备份");
+                System.out.println(">>> [DbSyncService] ✅ 已保存到本地备份: " + cloudDb);
             } catch (IOException e) {
-                System.err.println("[DbSync] 本地备份失败: " + e.getMessage());
+                System.err.println(">>> [DbSyncService] ❌ 本地备份失败: " + e.getMessage());
+                e.printStackTrace();
                 success = false;
             }
+        } else {
+            System.out.println(">>> [DbSyncService] 本地备份未启用，跳过");
         }
         
         // 2. WebDAV 同步
         if (webdavSync.isEnabled()) {
+            System.out.println(">>> [DbSyncService] 开始 WebDAV 同步...");
             boolean webdavSuccess = webdavSync.syncToCloud();
+            System.out.println(">>> [DbSyncService] WebDAV 同步结果: " + (webdavSuccess ? "成功" : "失败"));
             success = success && webdavSuccess;
+        } else {
+            System.out.println(">>> [DbSyncService] WebDAV 未启用，跳过");
         }
         
+        System.out.println(">>> [DbSyncService] syncToCloud() 最终结果: " + (success ? "成功" : "失败"));
         return success;
     }
 
@@ -138,11 +153,17 @@ public class DbSyncService {
      * 强制从坚果云 WebDAV 下载，覆盖本地数据库
      */
     public boolean syncFromCloud() {
+        System.out.println(">>> [DbSyncService] syncFromCloud() 被调用");
+        System.out.println(">>> [DbSyncService] WebDAV 启用: " + webdavSync.isEnabled());
+        
         // 仅支持 WebDAV 同步
         if (webdavSync.isEnabled()) {
-            return webdavSync.syncFromCloud();
+            System.out.println(">>> [DbSyncService] 开始从 WebDAV 下载...");
+            boolean result = webdavSync.syncFromCloud();
+            System.out.println(">>> [DbSyncService] WebDAV 下载结果: " + (result ? "成功" : "失败"));
+            return result;
         } else {
-            System.out.println("[DbSync] 云端同步未启用，无法下载");
+            System.out.println(">>> [DbSyncService] ❌ 云端同步未启用，无法下载");
             return false;
         }
     }
