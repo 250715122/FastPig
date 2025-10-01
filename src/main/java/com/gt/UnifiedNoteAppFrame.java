@@ -942,6 +942,13 @@ public class UnifiedNoteAppFrame extends JFrame {
     public void performExit() {
         exitApplication();
     }
+
+    /**
+     * 更新状态栏左侧文本（供外部调用，如全局热键）
+     */
+    public void updateStatusLeft(String text) {
+        SwingUtilities.invokeLater(() -> statusLeft.setText(text));
+    }
 }
 
 

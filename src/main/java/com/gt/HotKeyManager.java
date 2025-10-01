@@ -216,16 +216,37 @@ public class HotKeyManager {
      * 同步数据库到云端
      */
     private void syncToCloud() {
+        // 获取当前活动的编辑器窗口
+        UnifiedNoteAppFrame activeFrame = UnifiedNoteAppFrame.getActiveInstance();
+        
         try {
             System.out.println("[热键] 正在同步数据库到云端...");
+            
+            // 更新状态栏
+            if (activeFrame != null) {
+                activeFrame.updateStatusLeft("正在同步到云端…");
+            }
+            
+            // 执行同步
             boolean ok = DbSyncService.getInstance().syncToCloud();
+            
+            // 更新结果
             if (ok) {
                 System.out.println("[热键] 同步成功");
+                if (activeFrame != null) {
+                    activeFrame.updateStatusLeft("云端同步成功");
+                }
             } else {
                 System.out.println("[热键] 同步失败");
+                if (activeFrame != null) {
+                    activeFrame.updateStatusLeft("云端同步失败");
+                }
             }
         } catch (Exception ex) {
             System.err.println("[热键] 同步失败: " + ex.getMessage());
+            if (activeFrame != null) {
+                activeFrame.updateStatusLeft("云端同步失败: " + ex.getMessage());
+            }
         }
     }
 
