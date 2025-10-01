@@ -492,6 +492,12 @@ public class UnifiedNoteAppFrame extends JFrame {
             suggestModel.addElement(key + (key.isEmpty()? "": " ") + desc);
         }
         if (suggestModel.size()>0){
+            // 如果只剩一项，自动选中它
+            if (suggestModel.size() == 1) {
+                suggestSelectedIndex = 0;
+                suggestList.setSelectedIndex(0);
+                suggestList.ensureIndexIsVisible(0);
+            }
             try{
                 // 在正文首行下方显示
                 Rectangle r = bodyArea.modelToView(Math.min(firstNl>=0? firstNl : bodyArea.getText().length(), bodyArea.getCaretPosition()));
