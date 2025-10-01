@@ -56,6 +56,7 @@ test*.bat
 start-*.bat
 find-*.bat
 *-launcher.bat
+generate-ico.ps1
 
 # 临时文档
 *说明.md

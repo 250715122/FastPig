@@ -66,6 +66,9 @@ public class UnifiedNoteAppFrame extends JFrame {
         setSize(1100, 720);
         setLocationRelativeTo(null);
         
+        // 设置窗口图标
+        setWindowIcon();
+        
         // 初始化系统托盘
         initSystemTray();
         
@@ -778,6 +781,35 @@ public class UnifiedNoteAppFrame extends JFrame {
         String desc = f[2] == null? "" : f[2].trim();
         if (key.isEmpty() || key.contains(" ")) return false;
         return !desc.isEmpty();
+    }
+
+    /**
+     * 设置窗口图标
+     */
+    private void setWindowIcon() {
+        try {
+            // 尝试从资源文件加载图标
+            java.io.InputStream iconStream = getClass().getResourceAsStream("/icons/fastpig-32.png");
+            if (iconStream != null) {
+                BufferedImage iconImage = javax.imageio.ImageIO.read(iconStream);
+                setIconImage(iconImage);
+                System.out.println("[图标] 窗口图标加载成功");
+            } else {
+                // 如果资源文件不存在，使用代码生成的图标
+                Image icon = createTrayIcon();
+                setIconImage(icon);
+                System.out.println("[图标] 使用默认生成的图标");
+            }
+        } catch (Exception e) {
+            System.err.println("[图标] 加载窗口图标失败: " + e.getMessage());
+            // 使用默认生成的图标作为后备
+            try {
+                Image icon = createTrayIcon();
+                setIconImage(icon);
+            } catch (Exception ex) {
+                System.err.println("[图标] 生成默认图标失败: " + ex.getMessage());
+            }
+        }
     }
 
     /**

@@ -47,13 +47,21 @@ if not exist "%JPACKAGE%" (
 echo 使用 Java 21 jpackage
 echo.
 
-REM 3. 复制配置文件到 target 目录
+REM 3. 复制配置文件和图标到 target 目录
 if exist config.properties (
     copy config.properties target\config.properties
     echo 已复制配置文件到打包目录
 )
 
-REM 4. 生成应用程序（无控制台窗口）
+REM 复制图标文件到 target 目录
+if exist src\main\resources\icons\FastPig.ico (
+    copy src\main\resources\icons\FastPig.ico target\FastPig.ico
+    echo 已复制图标文件到打包目录
+) else (
+    echo 警告：未找到图标文件，使用默认图标
+)
+
+REM 4. 生成应用程序（无控制台窗口，带自定义图标）
 REM 注意：使用 --verbose 来查看详细输出
 call "%JPACKAGE%" ^
     --input target ^
@@ -62,6 +70,7 @@ call "%JPACKAGE%" ^
     --main-class com.gt.FastPigApplication ^
     --type app-image ^
     --dest . ^
+    --icon target\FastPig.ico ^
     --verbose
 
 if errorlevel 1 (
