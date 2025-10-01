@@ -1,0 +1,17 @@
+# FastPig 配置文件
+# 复制此文件为 config.properties 并填入你的坚果云账号信息
+
+# 坚果云 WebDAV 配置
+# 用户名（坚果云注册邮箱）
+nutstore.username=250715122@qq.com
+
+# 应用密码（不是登录密码！需要在坚果云网页端生成）
+# 获取方式：坚果云网页端 -> 账户信息 -> 安全选项 -> 添加应用密码
+nutstore.password=aqgd7w2f52j6g5sg
+
+# WebDAV 服务器地址（一般不需要修改）
+nutstore.webdav.base=https://dav.jianguoyun.com/dav/
+
+# 同步文件路径（相对于 WebDAV 根目录，一般不需要修改）
+nutstore.sync.path=FastPig/fastpig.db
+

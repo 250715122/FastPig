@@ -27,3 +27,36 @@ dependency-reduced-pom.xml
 
 # 错误日志
 error.txt
+
+# 打包生成的可执行文件目录
+FastPig/
+
+# 数据库文件
+*.db
+*.db-journal
+
+# 备份目录
+cleanup_backup_*/
+backup_*/
+
+# 本地配置文件（保留 .example 模板）
+config.properties
+
+# 临时笔记目录
+notes/
+
+# 临时测试脚本
+test*.bat
+start-*.bat
+find-*.bat
+*-launcher.bat
+
+# 临时文档
+*说明.md
+*指南.txt
+*结构*.md
+*REPORT*.md
+*TEST*.md
+*SYNC*.md
+*SETUP*.md
+*CONFIG*.md

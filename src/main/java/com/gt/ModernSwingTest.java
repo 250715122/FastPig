@@ -29,18 +29,30 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.text.BadLocationException;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 /**
  * 现代化的代码助手GUI - 使用混合热键管理器
  */
 public class ModernSwingTest extends JFrame {
 
     private static final long serialVersionUID = 1L;
+    private static final Logger logger = LogManager.getLogger(ModernSwingTest.class);
+    
     private HotKeyManager hotKeyManager;
     private JTextArea textArea;
 
     public static void main(String[] args) throws IOException {
+        logger.info("========================================");
+        logger.info("FastPig 启动中...");
+        logger.info("工作目录: {}", System.getProperty("user.dir"));
+        logger.info("========================================");
+        
         System.out.println("启动现代化代码助手...");
+        
         // 启动前：尝试从坚果云目录拉取最新数据库
+        logger.info("开始同步数据库...");
         DbSyncService.getInstance().syncFromCloudOnStart();
         
         // 启动统一界面

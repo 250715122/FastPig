@@ -40,16 +40,18 @@ public class DbSyncService {
 
     private DbSyncService() {
         this.localDb = Paths.get(System.getProperty("user.dir"), "fastpig.db");
-        // 本地备份目录
+        // 本地备份目录（已禁用，只使用坚果云云端备份）
         this.cloudDir = Paths.get(System.getProperty("user.dir"), "data");
         this.cloudDb = this.cloudDir.resolve("fastpig.db");
-        this.localBackupEnabled = true;
+        this.localBackupEnabled = false;  // 禁用本地备份
         this.webdavSync = NutstoreWebDAVSync.getInstance();
         
-        System.out.println("[DbSync] 本地备份目录: " + this.cloudDir.toAbsolutePath());
+        if (localBackupEnabled) {
+            System.out.println("[DbSync] 本地备份目录: " + this.cloudDir.toAbsolutePath());
+        }
     }
 
-    public boolean isEnabled() { return localBackupEnabled || webdavSync.isEnabled(); }
+    public boolean isEnabled() { return webdavSync.isEnabled(); }
 
     /**
      * 启动时同步策略：

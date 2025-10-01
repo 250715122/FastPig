@@ -9,10 +9,16 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Properties;
 
 /**
  * 坚果云 WebDAV 同步服务
  * 通过坚果云的 WebDAV 接口实现数据库文件的上传和下载
+ * 
+ * 配置方式（按优先级）：
+ * 1. config.properties 文件
+ * 2. 系统属性 (-Dnutstore.username=xxx)
+ * 3. 环境变量 (NUTSTORE_USERNAME)
  */
 public class NutstoreWebDAVSync {
     private static NutstoreWebDAVSync instance;
@@ -23,18 +29,28 @@ public class NutstoreWebDAVSync {
     private final String password;
     private final Path localDb;
     
-    // 坚果云 WebDAV 地址
-    private static final String NUTSTORE_WEBDAV_BASE = "https://dav.jianguoyun.com/dav/";
+    // 默认 WebDAV 地址
+    private static final String DEFAULT_WEBDAV_BASE = "https://dav.jianguoyun.com/dav/";
+    private static final String DEFAULT_SYNC_PATH = "FastPig/fastpig.db";
     
     private NutstoreWebDAVSync() {
         this.localDb = Paths.get(System.getProperty("user.dir"), "fastpig.db");
         
-        // 从系统属性或环境变量读取坚果云账号信息
-        this.username = System.getProperty("nutstore.username", System.getenv("NUTSTORE_USERNAME"));
-        this.password = System.getProperty("nutstore.password", System.getenv("NUTSTORE_PASSWORD"));
+        // 读取配置
+        Properties config = loadConfig();
         
-        // WebDAV 路径：FastPig/fastpig.db
-        this.webdavUrl = NUTSTORE_WEBDAV_BASE + "FastPig/fastpig.db";
+        // 优先级：系统属性 > 配置文件 > 环境变量
+        this.username = System.getProperty("nutstore.username", 
+                        config.getProperty("nutstore.username", 
+                        System.getenv("NUTSTORE_USERNAME")));
+        
+        this.password = System.getProperty("nutstore.password", 
+                        config.getProperty("nutstore.password", 
+                        System.getenv("NUTSTORE_PASSWORD")));
+        
+        String webdavBase = config.getProperty("nutstore.webdav.base", DEFAULT_WEBDAV_BASE);
+        String syncPath = config.getProperty("nutstore.sync.path", DEFAULT_SYNC_PATH);
+        this.webdavUrl = webdavBase + syncPath;
         
         this.enabled = (username != null && !username.isEmpty() 
                      && password != null && !password.isEmpty());
@@ -44,8 +60,43 @@ public class NutstoreWebDAVSync {
             System.out.println("[WebDAV] 用户名: " + username);
             System.out.println("[WebDAV] 云端路径: " + webdavUrl);
         } else {
-            System.out.println("[WebDAV] 坚果云同步未配置（需要设置 nutstore.username 和 nutstore.password）");
+            System.out.println("[WebDAV] 坚果云同步未配置");
+            System.out.println("[WebDAV] 请在 config.properties 中配置账号信息");
         }
+    }
+    
+    /**
+     * 加载配置文件
+     * 优先从程序所在目录读取，如果不存在则从 classpath 读取
+     */
+    private Properties loadConfig() {
+        Properties props = new Properties();
+        
+        // 尝试从程序所在目录读取
+        Path configFile = Paths.get(System.getProperty("user.dir"), "config.properties");
+        if (Files.exists(configFile)) {
+            try (InputStream input = new FileInputStream(configFile.toFile())) {
+                props.load(input);
+                System.out.println("[配置] 从 " + configFile + " 加载配置");
+                return props;
+            } catch (Exception e) {
+                System.err.println("[配置] 读取配置文件失败: " + e.getMessage());
+            }
+        }
+        
+        // 尝试从 classpath 读取
+        try (InputStream input = getClass().getClassLoader().getResourceAsStream("config.properties")) {
+            if (input != null) {
+                props.load(input);
+                System.out.println("[配置] 从 classpath 加载配置");
+            } else {
+                System.out.println("[配置] 未找到 config.properties 文件");
+            }
+        } catch (Exception e) {
+            System.err.println("[配置] 读取配置文件失败: " + e.getMessage());
+        }
+        
+        return props;
     }
     
     public static NutstoreWebDAVSync getInstance() {
@@ -108,12 +159,12 @@ public class NutstoreWebDAVSync {
             
             Sardine sardine = SardineFactory.begin(username, password);
             
-            // 确保 FastPig 目录存在（捕获异常，如果目录已存在会返回错误）
-            String parentUrl = NUTSTORE_WEBDAV_BASE + "FastPig/";
+            // 确保父目录存在（捕获异常，如果目录已存在会返回错误）
+            String parentUrl = webdavUrl.substring(0, webdavUrl.lastIndexOf('/') + 1);
             try {
                 if (!sardine.exists(parentUrl)) {
                     sardine.createDirectory(parentUrl);
-                    System.out.println("[WebDAV] 已创建云端目录: FastPig/");
+                    System.out.println("[WebDAV] 已创建云端目录: " + parentUrl);
                 }
             } catch (Exception e) {
                 // 目录可能已存在或无权限检查，直接尝试上传
