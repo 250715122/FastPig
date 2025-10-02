@@ -540,6 +540,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         String body = n.bodyMd==null? "" : n.bodyMd;
         if (!body.startsWith("\n") && !body.isEmpty()) body = "\n" + body;
         bodyArea.setText(first + body);
+        // 将光标移到文档开头（首行末尾）
+        bodyArea.setCaretPosition(first.length());
         updateFirstLineHighlight();
         updateEditorStatus();
     }
@@ -565,6 +567,8 @@ public class UnifiedNoteAppFrame extends JFrame {
     private void saveNew(boolean manual) {
         String[] parsed = splitFirstLineAndBody(bodyArea.getText());
         if (parsed[1].isEmpty()) { JOptionPane.showMessageDialog(this, "首行需包含快捷命令", "校验", JOptionPane.WARNING_MESSAGE); return; }
+        // 保存光标位置
+        int caretPos = bodyArea.getCaretPosition();
         NoteDto n = new NoteDto();
         n.id = UUID.randomUUID().toString();
         n.key = parsed[1];
@@ -579,7 +583,13 @@ public class UnifiedNoteAppFrame extends JFrame {
         n.version = 1;
         repository.save(n);
         if (manual) JOptionPane.showMessageDialog(this, "已保存为新", "提示", JOptionPane.INFORMATION_MESSAGE);
-        loadNote(n);
+        // 只更新 current，不重新加载文本
+        current = n;
+        updateEditorStatus();
+        // 恢复光标位置
+        try {
+            bodyArea.setCaretPosition(Math.min(caretPos, bodyArea.getText().length()));
+        } catch (Exception ignored) {}
     }
 
     private void updateCurrent(boolean manual) {
@@ -590,8 +600,10 @@ public class UnifiedNoteAppFrame extends JFrame {
         }
         String[] parsed = splitFirstLineAndBody(bodyArea.getText());
         if (parsed[1].isEmpty()) { JOptionPane.showMessageDialog(this, "首行需包含快捷命令", "校验", JOptionPane.WARNING_MESSAGE); return; }
+        // 保存光标位置
+        int caretPos = bodyArea.getCaretPosition();
         String newKey = parsed[1];
-        // 如果快捷命令已改变，则按“保存为新”处理；否则更新当前
+        // 如果快捷命令已改变，则按"保存为新"处理；否则更新当前
         if (!newKey.equals(current.key)) {
             NoteDto n = new NoteDto();
             n.id = UUID.randomUUID().toString();
@@ -607,7 +619,13 @@ public class UnifiedNoteAppFrame extends JFrame {
             n.version = 1;
             repository.save(n);
             if (manual) JOptionPane.showMessageDialog(this, "已保存为新（快捷命令已变更）", "提示", JOptionPane.INFORMATION_MESSAGE);
-            loadNote(n);
+            // 只更新 current，不重新加载文本
+            current = n;
+            updateEditorStatus();
+            // 恢复光标位置
+            try {
+                bodyArea.setCaretPosition(Math.min(caretPos, bodyArea.getText().length()));
+            } catch (Exception ignored) {}
             return;
         }
         current.key = newKey;
@@ -619,7 +637,12 @@ public class UnifiedNoteAppFrame extends JFrame {
         current.version = Math.max(1, current.version + 1);
         repository.save(current);
         if (manual) JOptionPane.showMessageDialog(this, "已更新", "提示", JOptionPane.INFORMATION_MESSAGE);
-        loadNote(current);
+        // 只更新状态，不重新加载文本
+        updateEditorStatus();
+        // 恢复光标位置
+        try {
+            bodyArea.setCaretPosition(Math.min(caretPos, bodyArea.getText().length()));
+        } catch (Exception ignored) {}
     }
 
     private void saveUnified(boolean manual) {
