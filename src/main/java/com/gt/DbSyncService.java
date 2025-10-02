@@ -5,6 +5,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.Statement;
 
 /**
  * 数据库同步服务 - 集成本地备份和坚果云 WebDAV 同步
@@ -94,6 +97,7 @@ public class DbSyncService {
 
     /**
      * 上传到云端策略：
+     * 0. 执行 WAL checkpoint 确保所有数据写入主文件
      * 1. 先保存到本地 data 目录备份
      * 2. 再上传到坚果云 WebDAV（如果配置了）
      */
@@ -102,6 +106,14 @@ public class DbSyncService {
         System.out.println(">>> [DbSyncService] 本地数据库: " + localDb);
         System.out.println(">>> [DbSyncService] 本地备份启用: " + localBackupEnabled);
         System.out.println(">>> [DbSyncService] WebDAV 启用: " + webdavSync.isEnabled());
+        
+        // 0. 执行 WAL checkpoint 确保数据写入主文件
+        System.out.println(">>> [DbSyncService] 执行 WAL checkpoint...");
+        if (!checkpointWAL()) {
+            System.err.println(">>> [DbSyncService] ⚠️ WAL checkpoint 失败，但继续上传");
+        } else {
+            System.out.println(">>> [DbSyncService] ✅ WAL checkpoint 完成");
+        }
         
         boolean success = true;
         
@@ -171,6 +183,30 @@ public class DbSyncService {
     private void ensureCloudDir() throws IOException {
         if (!Files.exists(cloudDir)) {
             Files.createDirectories(cloudDir);
+        }
+    }
+    
+    /**
+     * 执行 SQLite WAL checkpoint
+     * 将 WAL 文件中的所有更改合并到主数据库文件
+     */
+    private boolean checkpointWAL() {
+        String jdbcUrl = "jdbc:sqlite:" + localDb.toAbsolutePath().toString();
+        try (Connection conn = DriverManager.getConnection(jdbcUrl);
+             Statement stmt = conn.createStatement()) {
+            
+            System.out.println(">>> [DbSyncService] 连接到数据库: " + jdbcUrl);
+            
+            // 执行 PRAGMA wal_checkpoint(TRUNCATE)
+            // TRUNCATE 模式会将 WAL 文件清空，确保所有数据都在主文件中
+            stmt.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+            System.out.println(">>> [DbSyncService] WAL checkpoint(TRUNCATE) 执行成功");
+            
+            return true;
+        } catch (Exception e) {
+            System.err.println(">>> [DbSyncService] ❌ WAL checkpoint 失败: " + e.getMessage());
+            e.printStackTrace();
+            return false;
         }
     }
 }

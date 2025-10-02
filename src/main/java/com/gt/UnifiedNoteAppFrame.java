@@ -44,11 +44,17 @@ public class UnifiedNoteAppFrame extends JFrame {
                     Graphics2D g2 = (Graphics2D) g.create();
                     g2.setColor(new Color(0,0,0,110));
                     g2.setFont(getFont().deriveFont(Font.ITALIC));
-                    String hint = "在此输入：快捷命令 空格 描述；第二行开始正文（Ctrl+S保存，Alt+P预览，Alt+D删除）";
+                    String[] hints = {
+                        "在此输入：快捷命令 空格 描述；",
+                        "这里写正文（Ctrl+S保存，Alt+P预览，Alt+D删除）"
+                    };
                     FontMetrics fm = g2.getFontMetrics();
                     int x = getInsets().left + 6;
                     int y = getInsets().top + fm.getAscent() + 2;
-                    g2.drawString(hint, x, y);
+                    int lineHeight = fm.getHeight();
+                    for (int i = 0; i < hints.length; i++) {
+                        g2.drawString(hints[i], x, y + i * lineHeight);
+                    }
                     g2.dispose();
                 }
             }catch(Exception ignored){}
@@ -60,7 +66,7 @@ public class UnifiedNoteAppFrame extends JFrame {
     private NoteDto current;
 
     public UnifiedNoteAppFrame(NoteRepository repository) {
-        super("迅猪 - 统一界面（搜索/展示/编辑/保存）");
+        super("迅猪");
         this.repository = repository;
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setSize(1100, 720);

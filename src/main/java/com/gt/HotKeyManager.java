@@ -319,7 +319,7 @@ public class HotKeyManager {
                     // 提示：需要重启应用才能看到云端数据
                     javax.swing.JOptionPane.showMessageDialog(
                         activeFrame,
-                        "数据库已从云端下载并覆盖本地。\n请重启应用以加载云端数据。",
+                        "数据已从云端更新到本地！",
                         "下载成功",
                         javax.swing.JOptionPane.INFORMATION_MESSAGE
                     );
