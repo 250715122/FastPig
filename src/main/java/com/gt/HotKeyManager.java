@@ -35,6 +35,10 @@ public class HotKeyManager {
     private static final int HOTKEY_EXIT = 4;
     private static final int HOTKEY_SYNC = 5; // Alt+S 同步到云端
     private static final int HOTKEY_PULL = 6; // Alt+U 从云端下载
+    // 兼容 Ctrl 系列
+    private static final int HOTKEY_SHOW_NORMAL_CTRL = 11; // Ctrl+N
+    private static final int HOTKEY_SHOW_MAX_CTRL = 12;    // Ctrl+M
+    private static final int HOTKEY_MINIMIZE_CTRL = 13;    // Ctrl+L
     
     public HotKeyManager(JFrame frame, JTextArea textArea) {
         this.targetFrame = frame;
@@ -124,13 +128,17 @@ public class HotKeyManager {
         try {
             System.out.println("尝试初始化JIntellitype...");
             
-            // 注册热键
+            // 注册热键（Alt 系列）
             JIntellitype.getInstance().registerHotKey(HOTKEY_SHOW_NORMAL, JIntellitype.MOD_ALT, (int)'N');
             JIntellitype.getInstance().registerHotKey(HOTKEY_SHOW_MAX, JIntellitype.MOD_ALT, (int)'M');
             JIntellitype.getInstance().registerHotKey(HOTKEY_MINIMIZE, JIntellitype.MOD_ALT, (int)'L');
             JIntellitype.getInstance().registerHotKey(HOTKEY_EXIT, JIntellitype.MOD_ALT, (int)'Q');
             JIntellitype.getInstance().registerHotKey(HOTKEY_SYNC, JIntellitype.MOD_ALT, (int)'S');
             JIntellitype.getInstance().registerHotKey(HOTKEY_PULL, JIntellitype.MOD_ALT, (int)'U');
+            // 注册 Ctrl 系列（兼容用户习惯）
+            JIntellitype.getInstance().registerHotKey(HOTKEY_SHOW_NORMAL_CTRL, JIntellitype.MOD_CONTROL, (int)'N');
+            JIntellitype.getInstance().registerHotKey(HOTKEY_SHOW_MAX_CTRL,    JIntellitype.MOD_CONTROL, (int)'M');
+            JIntellitype.getInstance().registerHotKey(HOTKEY_MINIMIZE_CTRL,    JIntellitype.MOD_CONTROL, (int)'L');
             
             // 添加热键监听器
             JIntellitype.getInstance().addHotKeyListener(new HotkeyListener() {
@@ -198,6 +206,23 @@ public class HotKeyManager {
                     break;
             }
         }
+        // Ctrl 系列兼容
+        if (ctrlPressed && !altPressed) {
+            System.out.println("检测到Ctrl组合键: Ctrl + " + NativeKeyEvent.getKeyText(e.getKeyCode()));
+            switch (e.getKeyCode()) {
+                case NativeKeyEvent.VC_N:
+                    showWindowNormal();
+                    break;
+                case NativeKeyEvent.VC_M:
+                    showWindowMaximized();
+                    break;
+                case NativeKeyEvent.VC_L:
+                    minimizeWindow();
+                    break;
+                default:
+                    break;
+            }
+        }
     }
     
     /**
@@ -206,12 +231,15 @@ public class HotKeyManager {
     private void handleJIntellitypeHotKey(int identifier) {
         switch (identifier) {
             case HOTKEY_SHOW_NORMAL:
+            case HOTKEY_SHOW_NORMAL_CTRL:
                 showWindowNormal();
                 break;
             case HOTKEY_SHOW_MAX:
+            case HOTKEY_SHOW_MAX_CTRL:
                 showWindowMaximized();
                 break;
             case HOTKEY_MINIMIZE:
+            case HOTKEY_MINIMIZE_CTRL:
                 minimizeWindow();
                 break;
             case HOTKEY_EXIT:
@@ -463,6 +491,7 @@ public class HotKeyManager {
         System.out.println("Alt + Q: 退出程序");
         System.out.println("Alt + S: 上传数据库到云端");
         System.out.println("Alt + U: 从云端下载数据库");
+        System.out.println("Ctrl + N/M/L: 兼容全局窗口控制");
         System.out.println("========================");
     }
     
@@ -477,6 +506,7 @@ public class HotKeyManager {
         System.out.println("Alt + Q: 退出程序");
         System.out.println("Alt + S: 上传数据库到云端");
         System.out.println("Alt + U: 从云端下载数据库");
+        System.out.println("Ctrl + N/M/L: 兼容全局窗口控制");
         System.out.println("=========================");
     }
 }
