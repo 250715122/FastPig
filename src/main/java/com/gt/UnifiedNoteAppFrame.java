@@ -1530,6 +1530,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         if (selectionToolbarInitialized) return;
         selectionToolbar = new JPopupMenu();
         selectionToolbar.setBorder(BorderFactory.createLineBorder(new Color(200,200,200)));
+        // 关键：工具条不抢焦点，避免打断 Shift+方向键的连续选择
+        selectionToolbar.setFocusable(false);
 
         addSelItem(selectionToolbar, "加粗", () -> wrapSelection("**", "**"));
         addSelItem(selectionToolbar, "斜体", () -> wrapSelection("*", "*"));
@@ -1573,6 +1575,8 @@ public class UnifiedNoteAppFrame extends JFrame {
             int x = r.x + 4;
             int y = r.y + r.height + 2;
             selectionToolbar.show(bodyArea, x, y);
+            // 关键：展示后把焦点立即还给编辑器，保证后续 Shift+方向键可继续扩展选区
+            javax.swing.SwingUtilities.invokeLater(() -> bodyArea.requestFocusInWindow());
         }catch(Exception ignored){}
     }
 
