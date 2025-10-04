@@ -14,12 +14,18 @@ import java.io.ByteArrayOutputStream;
 import javax.imageio.ImageIO;
 import javax.swing.text.Highlighter;
 import javax.swing.text.DefaultHighlighter;
+import javax.swing.event.UndoableEditEvent;
+import javax.swing.event.UndoableEditListener;
+import javax.swing.undo.UndoManager;
 import java.io.File;
 
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.util.ast.Node;
 import com.vladsch.flexmark.util.data.MutableDataSet;
+import com.vladsch.flexmark.ext.tables.TablesExtension;
+import com.vladsch.flexmark.util.misc.Extension;
+import java.util.Arrays;
 import org.scilab.forge.jlatexmath.TeXConstants;
 import org.scilab.forge.jlatexmath.TeXFormula;
 import org.scilab.forge.jlatexmath.TeXIcon;
@@ -62,6 +68,15 @@ public class UnifiedNoteAppFrame extends JFrame {
     };
     private final Highlighter.HighlightPainter firstLinePainter = new DefaultHighlighter.DefaultHighlightPainter(new Color(255,255,0,40));
     private Object firstLineHighlightTag;
+
+    // 页内搜索组件
+    private JPanel searchPanel;
+    private JTextField searchField;
+    private JLabel searchResultLabel;
+    private final Highlighter.HighlightPainter searchHighlightPainter = new DefaultHighlighter.DefaultHighlightPainter(new Color(255,200,0,150));
+    private final List<Object> searchHighlightTags = new ArrayList<>();
+    private int currentSearchIndex = -1;
+    private final List<Integer> searchMatchPositions = new ArrayList<>();
 
     private NoteDto current;
 
@@ -107,6 +122,19 @@ public class UnifiedNoteAppFrame extends JFrame {
         });
         // 将方向键与回车交互绑定到正文首行（使用 bodyArea 捕获按键）
         bodyArea.addKeyListener(new java.awt.event.KeyAdapter(){
+            @Override public void keyTyped(java.awt.event.KeyEvent e) {
+                // 监听 `/` 键，弹出快捷命令菜单
+                if (e.getKeyChar() == '/') {
+                    int pos = bodyArea.getCaretPosition();
+                    String text = bodyArea.getText();
+                    // 检查是否在行首或空格后（避免在正常文本中间弹出）
+                    if (pos == 0 || (pos > 0 && (text.charAt(pos - 1) == '\n' || text.charAt(pos - 1) == ' '))) {
+                        SwingUtilities.invokeLater(() -> showSlashCommandMenu());
+                        e.consume(); // 阻止 `/` 输入
+                    }
+                }
+            }
+            
             @Override public void keyReleased(java.awt.event.KeyEvent e){
                 int code = e.getKeyCode();
                 if (code==java.awt.event.KeyEvent.VK_DOWN){
@@ -142,6 +170,29 @@ public class UnifiedNoteAppFrame extends JFrame {
         // 顶部栏移除
 
         bodyArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
+
+        // 撤销/重做支持（Ctrl+Z / Ctrl+Y）
+        final UndoManager undoManager = new UndoManager();
+        bodyArea.getDocument().addUndoableEditListener(new UndoableEditListener() {
+            @Override public void undoableEditHappened(UndoableEditEvent e) {
+                undoManager.addEdit(e.getEdit());
+            }
+        });
+        // 绑定快捷键
+        KeyStroke ksUndo = KeyStroke.getKeyStroke("control Z");
+        KeyStroke ksRedo = KeyStroke.getKeyStroke("control Y");
+        bodyArea.getInputMap(JComponent.WHEN_FOCUSED).put(ksUndo, "editorUndo");
+        bodyArea.getActionMap().put("editorUndo", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){
+                try { if (undoManager.canUndo()) undoManager.undo(); } catch (Exception ignored) {}
+            }
+        });
+        bodyArea.getInputMap(JComponent.WHEN_FOCUSED).put(ksRedo, "editorRedo");
+        bodyArea.getActionMap().put("editorRedo", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){
+                try { if (undoManager.canRedo()) undoManager.redo(); } catch (Exception ignored) {}
+            }
+        });
         bodyArea.setLineWrap(true);
         bodyScrollPane = new JScrollPane(bodyArea);
         // 首行高亮：随内容变化动态更新
@@ -159,13 +210,16 @@ public class UnifiedNoteAppFrame extends JFrame {
         statusBar.add(statusLeft, BorderLayout.WEST);
         statusBar.add(statusRight, BorderLayout.EAST);
 
-        JPanel editor = new JPanel(new BorderLayout(8, 8));
-        editor.add(bodyScrollPane, BorderLayout.CENTER);
-        editor.add(statusBar, BorderLayout.SOUTH);
+        // 初始化页内搜索面板
+        initSearchPanel();
+
+        editorPanel = new JPanel(new BorderLayout(8, 8));
+        editorPanel.add(bodyScrollPane, BorderLayout.CENTER);
+        editorPanel.add(statusBar, BorderLayout.SOUTH);
 
         setLayout(new BorderLayout(8, 8));
-        add(editor, BorderLayout.CENTER);
-        centerComponent = editor;
+        add(editorPanel, BorderLayout.CENTER);
+        centerComponent = editorPanel;
         ACTIVE = this;
 
         // 绑定全局快捷键：Ctrl+S -> 保存
@@ -225,6 +279,13 @@ public class UnifiedNoteAppFrame extends JFrame {
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlAltZ, "undoSoftDelete");
         root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksAltZ, "undoSoftDelete");
         root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksAltGrZ, "undoSoftDelete");
+        
+        // 页内搜索 Ctrl+F
+        KeyStroke ksCtrlF = KeyStroke.getKeyStroke("control F");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlF, "toggleSearch");
+        root.getActionMap().put("toggleSearch", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { toggleSearchPanel(); }
+        });
         root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksCtrlAltZ, "undoSoftDelete");
         root.getActionMap().put("undoSoftDelete", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) { undoSoftDelete(); }
@@ -312,6 +373,7 @@ public class UnifiedNoteAppFrame extends JFrame {
     private long lastSavedAt = 0L;
     private boolean darkTheme = false;
     private Component centerComponent;
+    private JPanel editorPanel; // 持有编辑器的面板，用于动态添加搜索栏
     // 预览按钮已移除，保留占位避免大范围改动
     // private JButton previewBtnRef;
     // 保持最近激活实例，便于全局热键调用
@@ -373,6 +435,8 @@ public class UnifiedNoteAppFrame extends JFrame {
 
     private void refreshInAppPreview() {
         String md = bodyArea.getText();
+        // 预处理：为 Markdown 表格自动补充必要的空行，避免被当作普通段落渲染
+        md = normalizeMarkdownTables(md);
         // 大文档降频：超过 50KB 时预览去抖提升到 600ms
         if (md != null && md.length() > 50 * 1024 && previewTimer != null) {
             int delay = 600;
@@ -380,9 +444,30 @@ public class UnifiedNoteAppFrame extends JFrame {
         }
         // 将所有 LaTeX 片段替换为内联图片占位
         String mdWithImgs = replaceAllLatexWithImages(md);
+        // 将所有 Mermaid 代码块替换为图片
+        mdWithImgs = replaceAllMermaidWithImages(mdWithImgs);
         String html = renderMarkdown(mdWithImgs);
-        htmlPane.setText("<html><head><meta charset='utf-8'></head><body style='font-family:Segoe UI;line-height:1.6;white-space:pre-wrap;'>" + html + "</body></html>");
+        try {
+            String snippet = mdWithImgs.length() > 200 ? mdWithImgs.substring(0, 200) + "..." : mdWithImgs;
+            System.out.println("[预览] Markdown 片段: \n" + snippet);
+            System.out.println("[预览] 是否包含<table>: " + (html.contains("<table") ? "是" : "否"));
+        } catch (Exception ignore) {}
+        
+        // 构建完整的 HTML
+        String fullHtml = "<html><head><meta charset='utf-8'><style>" +
+                         "body { font-family: 'Segoe UI', sans-serif; line-height: 1.6; padding: 10px; }" +
+                         "p { white-space: pre-wrap; }" +
+                         "pre { background-color: #f5f5f5; padding: 10px; border-radius: 5px; overflow-x: auto; white-space: pre-wrap; }" +
+                         "code { background-color: #f0f0f0; padding: 2px 4px; border-radius: 3px; }" +
+                         "img { max-width: 100%; height: auto; display: block; margin: 10px auto; }" +
+                         "table { border-collapse: collapse; width: 100%; margin: 10px 0; white-space: normal; }" +
+                         "th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }" +
+                         "th { background-color: #f5f5f5; font-weight: bold; }" +
+                         "tr:nth-child(even) { background-color: #fafafa; }" +
+                         "</style></head><body>" + html + "</body></html>";
+        htmlPane.setText(fullHtml);
         htmlPane.setCaretPosition(0);
+        
         // 预览指示浮标
         try {
             JLayeredPane layered = getLayeredPane();
@@ -405,15 +490,132 @@ public class UnifiedNoteAppFrame extends JFrame {
             t.start();
         } catch (Exception ignored) {}
     }
+    
+    /**
+     * 将所有 Mermaid 代码块替换为图片
+     */
+    private String replaceAllMermaidWithImages(String text) {
+        if (text == null) return "";
+        
+        // 匹配 ```mermaid ... ``` 代码块
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+            "```mermaid\\s*\\n([\\s\\S]*?)\\n```",
+            java.util.regex.Pattern.MULTILINE
+        );
+        
+        StringBuffer result = new StringBuffer();
+        java.util.regex.Matcher matcher = pattern.matcher(text);
+        
+        while (matcher.find()) {
+            String mermaidCode = matcher.group(1).trim();
+            String imageTag = convertMermaidToImageTag(mermaidCode);
+            matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement(imageTag));
+        }
+        matcher.appendTail(result);
+        
+        return result.toString();
+    }
+    
+    /**
+     * 将 Mermaid 代码转换为图片标签
+     * 使用 mermaid.ink 在线API
+     */
+    private String convertMermaidToImageTag(String mermaidCode) {
+        try {
+            // 对 Mermaid 代码进行 Base64 编码
+            String encoded = java.util.Base64.getEncoder().encodeToString(mermaidCode.getBytes("UTF-8"));
+            
+            // 使用 mermaid.ink API
+            // 格式: https://mermaid.ink/img/<base64_encoded_code>
+            String imageUrl = "https://mermaid.ink/img/" + encoded;
+            
+            // 返回 Markdown 图片语法
+            return "\n![Mermaid Diagram](" + imageUrl + ")\n";
+            
+        } catch (Exception e) {
+            // 如果转换失败，返回原始代码块
+            return "\n```mermaid\n" + mermaidCode + "\n```\n";
+        }
+    }
 
     private String renderMarkdown(String md) {
         MutableDataSet opts = new MutableDataSet();
         // 关键：将软换行渲染为 <br/>，避免 JEditorPane 折叠换行
         opts.set(HtmlRenderer.SOFT_BREAK, "<br/>");
+        // 启用表格扩展
+        opts.set(Parser.EXTENSIONS, Arrays.asList(TablesExtension.create()));
         Parser parser = Parser.builder(opts).build();
         HtmlRenderer renderer = HtmlRenderer.builder(opts).build();
         Node doc = parser.parse(md == null ? "" : md);
         return renderer.render(doc);
+    }
+
+    /**
+     * 规范化 Markdown 表格：
+     * - 在表格块前后确保有一个空行
+     * - 去除表格行首多余的竖线左侧空白
+     */
+    private String normalizeMarkdownTables(String src) {
+        if (src == null || src.isEmpty()) return src;
+        String[] lines = src.split("\n", -1);
+        StringBuilder out = new StringBuilder(src.length() + 64);
+        boolean inTableBlock = false;
+
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            String trimmed = line.trim();
+
+            boolean isFence = trimmed.startsWith("```");
+            boolean isRow = !isFence && looksLikeTableRow(trimmed);
+            boolean isSep = !isFence && looksLikeTableSeparator(trimmed);
+
+            if (!inTableBlock && (isRow || isSep)) {
+                // 表格块开始：确保表格前有一个空行（即前面以两个换行结尾）
+                if (out.length() > 0) {
+                    int len = out.length();
+                    boolean hasBlank = len >= 2 && out.charAt(len - 1) == '\n' && out.charAt(len - 2) == '\n';
+                    if (!hasBlank) out.append('\n');
+                }
+                inTableBlock = true;
+            } else if (inTableBlock && !(isRow || isSep)) {
+                // 表格块结束：补空行
+                if (out.length() > 0 && out.charAt(out.length() - 1) != '\n') out.append('\n');
+                out.append('\n');
+                inTableBlock = false;
+            }
+
+            if (inTableBlock && (isRow || isSep)) {
+                // 简单规范化：两端加上竖线
+                String t = trimmed;
+                // 避免影响对齐符号（:-:）的列，两侧只补缺失的一侧
+                if (!t.startsWith("|")) t = "|" + t;
+                if (!t.endsWith("|")) t = t + "|";
+                out.append(t).append('\n');
+            } else {
+                out.append(line).append('\n');
+            }
+        }
+        return out.toString();
+    }
+
+    private boolean looksLikeTableRow(String trimmed) {
+        // 至少包含两个竖线，且不是标题/列表行
+        long bars = trimmed.chars().filter(ch -> ch == '|').count();
+        if (bars < 2) return false;
+        if (trimmed.startsWith("#") || trimmed.startsWith("*") || trimmed.startsWith("-") && !trimmed.contains("|")) return false;
+        return true;
+    }
+
+    private boolean looksLikeTableSeparator(String trimmed) {
+        if (!trimmed.contains("|")) return false;
+        String withoutPipes = trimmed.replace("|", "").trim();
+        // 仅由 - : 和 空格 组成
+        for (int i = 0; i < withoutPipes.length(); i++) {
+            char c = withoutPipes.charAt(i);
+            if (!(c == '-' || c == ':' || Character.isWhitespace(c))) return false;
+        }
+        // 至少包含一个 -
+        return withoutPipes.indexOf('-') >= 0;
     }
 
     private String replaceAllLatexWithImages(String text) {
@@ -977,6 +1179,332 @@ public class UnifiedNoteAppFrame extends JFrame {
      */
     public void updateStatusLeft(String text) {
         SwingUtilities.invokeLater(() -> statusLeft.setText(text));
+    }
+    
+    /**
+     * 显示 `/` 快捷命令菜单
+     */
+    private void showSlashCommandMenu() {
+        JPopupMenu slashMenu = new JPopupMenu();
+        slashMenu.setBorder(BorderFactory.createLineBorder(new Color(200, 200, 200)));
+        
+        // 代码块 - 通用
+        addSlashMenuItem(slashMenu, "💻 代码块", () -> insertTemplate("```\n\n```", 4));
+        
+        slashMenu.addSeparator();
+        
+        // 图片
+        addSlashMenuItem(slashMenu, "🖼 图片(网络)", () -> insertTemplate("![描述](https://example.com/image.png)", 3));
+        
+        slashMenu.addSeparator();
+        
+        // 表格
+        addSlashMenuItem(slashMenu, "📊 表格", () -> insertTemplate(
+            "| 列1 | 列2 | 列3 |\n" +
+            "|-----|-----|-----|\n" +
+            "| 内容 | 内容 | 内容 |", 2));
+        
+        slashMenu.addSeparator();
+        
+        // 数学公式
+        addSlashMenuItem(slashMenu, "🔢 行内公式", () -> insertTemplate("$  $", 1));
+        addSlashMenuItem(slashMenu, "🔢 块级公式", () -> insertTemplate("$$\n\n$$", 3));
+        
+        slashMenu.addSeparator();
+        
+        // 列表
+        addSlashMenuItem(slashMenu, "📝 无序列表", () -> insertTemplate("- ", 2));
+        addSlashMenuItem(slashMenu, "🔢 有序列表", () -> insertTemplate("1. ", 3));
+        addSlashMenuItem(slashMenu, "☑️ 任务列表", () -> insertTemplate("- [ ] ", 6));
+        
+        slashMenu.addSeparator();
+        
+        // 引用和分隔
+        addSlashMenuItem(slashMenu, "💬 引用", () -> insertTemplate("> ", 2));
+        addSlashMenuItem(slashMenu, "➖ 分隔线", () -> insertTemplate("\n---\n", 0));
+        
+        slashMenu.addSeparator();
+        
+        // 文本格式
+        addSlashMenuItem(slashMenu, "**加粗**", () -> insertTemplate("****", 2));
+        addSlashMenuItem(slashMenu, "*斜体*", () -> insertTemplate("**", 1));
+        addSlashMenuItem(slashMenu, "`代码`", () -> insertTemplate("``", 1));
+        addSlashMenuItem(slashMenu, "[链接](url)", () -> insertTemplate("[]()", 1));
+        
+        slashMenu.addSeparator();
+        
+        // 文本绘图（Mermaid）
+        addSlashMenuItem(slashMenu, "📊 流程图", () -> insertTemplate(
+            "```mermaid\n" +
+            "graph TD\n" +
+            "    A[开始] --> B{判断条件}\n" +
+            "    B -->|是| C[执行操作1]\n" +
+            "    B -->|否| D[执行操作2]\n" +
+            "    C --> E[结束]\n" +
+            "    D --> E\n" +
+            "```", 26));
+        
+        addSlashMenuItem(slashMenu, "⏱️ 时序图", () -> insertTemplate(
+            "```mermaid\n" +
+            "sequenceDiagram\n" +
+            "    participant 用户\n" +
+            "    participant 系统\n" +
+            "    用户->>系统: 发送请求\n" +
+            "    系统->>系统: 处理请求\n" +
+            "    系统-->>用户: 返回结果\n" +
+            "```", 26));
+        
+        addSlashMenuItem(slashMenu, "📅 甘特图", () -> insertTemplate(
+            "```mermaid\n" +
+            "gantt\n" +
+            "    title 项目进度\n" +
+            "    dateFormat YYYY-MM-DD\n" +
+            "    section 阶段1\n" +
+            "    任务1           :a1, 2024-01-01, 30d\n" +
+            "    任务2           :after a1, 20d\n" +
+            "    section 阶段2\n" +
+            "    任务3           :2024-02-01, 12d\n" +
+            "```", 26));
+        
+        addSlashMenuItem(slashMenu, "🥧 饼图", () -> insertTemplate(
+            "```mermaid\n" +
+            "pie title 数据分布\n" +
+            "    \"类别A\" : 45\n" +
+            "    \"类别B\" : 30\n" +
+            "    \"类别C\" : 25\n" +
+            "```", 26));
+        
+        addSlashMenuItem(slashMenu, "🌳 思维导图", () -> insertTemplate(
+            "```mermaid\n" +
+            "mindmap\n" +
+            "  root((中心主题))\n" +
+            "    分支1\n" +
+            "      子分支1.1\n" +
+            "      子分支1.2\n" +
+            "    分支2\n" +
+            "      子分支2.1\n" +
+            "      子分支2.2\n" +
+            "```", 26));
+        
+        addSlashMenuItem(slashMenu, "📈 类图", () -> insertTemplate(
+            "```mermaid\n" +
+            "classDiagram\n" +
+            "    class Animal {\n" +
+            "        +String name\n" +
+            "        +int age\n" +
+            "        +eat()\n" +
+            "        +sleep()\n" +
+            "    }\n" +
+            "    class Dog {\n" +
+            "        +bark()\n" +
+            "    }\n" +
+            "    Animal <|-- Dog\n" +
+            "```", 26));
+        
+        // 显示菜单
+        try {
+            Point p = bodyArea.modelToView2D(bodyArea.getCaretPosition()).getBounds().getLocation();
+            SwingUtilities.convertPointToScreen(p, bodyArea);
+            SwingUtilities.convertPointFromScreen(p, bodyArea);
+            slashMenu.show(bodyArea, p.x, p.y + 20);
+        } catch (Exception e) {
+            slashMenu.show(bodyArea, 100, 100);
+        }
+    }
+    
+    /**
+     * 添加快捷命令菜单项
+     */
+    private void addSlashMenuItem(JPopupMenu menu, String label, Runnable action) {
+        JMenuItem item = new JMenuItem(label);
+        item.addActionListener(e -> {
+            action.run();
+            menu.setVisible(false);
+        });
+        menu.add(item);
+    }
+    
+    /**
+     * 插入模板文本
+     * @param template 模板文本
+     * @param cursorOffset 插入后光标相对于起始位置的偏移量
+     */
+    private void insertTemplate(String template, int cursorOffset) {
+        try {
+            int pos = bodyArea.getCaretPosition();
+            bodyArea.insert(template, pos);
+            // 将光标移到合适位置
+            bodyArea.setCaretPosition(pos + cursorOffset);
+            bodyArea.requestFocus();
+        } catch (Exception ignored) {}
+    }
+    
+    /**
+     * 初始化页内搜索面板
+     */
+    private void initSearchPanel() {
+        searchPanel = new JPanel(new BorderLayout(8, 0));
+        searchPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(200, 200, 200)),
+            BorderFactory.createEmptyBorder(6, 8, 6, 8)
+        ));
+        searchPanel.setBackground(new Color(245, 245, 245));
+        
+        JLabel searchLabel = new JLabel("查找:");
+        searchField = new JTextField(20);
+        searchResultLabel = new JLabel("");
+        
+        JButton prevBtn = new JButton("↑");
+        JButton nextBtn = new JButton("↓");
+        JButton closeBtn = new JButton("×");
+        
+        prevBtn.setMargin(new Insets(2, 8, 2, 8));
+        nextBtn.setMargin(new Insets(2, 8, 2, 8));
+        closeBtn.setMargin(new Insets(2, 8, 2, 8));
+        
+        prevBtn.addActionListener(e -> findPrevious());
+        nextBtn.addActionListener(e -> findNext());
+        closeBtn.addActionListener(e -> toggleSearchPanel());
+        
+        // 搜索框输入时实时搜索
+        searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { performSearch(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { performSearch(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { performSearch(); }
+        });
+        
+        // 搜索框回车时查找下一个
+        searchField.addActionListener(e -> findNext());
+        
+        // ESC 关闭搜索面板
+        searchField.getInputMap(JComponent.WHEN_FOCUSED).put(
+            KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0), "closeSearch");
+        searchField.getActionMap().put("closeSearch", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { toggleSearchPanel(); }
+        });
+        
+        JPanel leftPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        leftPanel.setOpaque(false);
+        leftPanel.add(searchLabel);
+        leftPanel.add(searchField);
+        leftPanel.add(prevBtn);
+        leftPanel.add(nextBtn);
+        leftPanel.add(searchResultLabel);
+        
+        searchPanel.add(leftPanel, BorderLayout.WEST);
+        searchPanel.add(closeBtn, BorderLayout.EAST);
+        
+        searchPanel.setVisible(false); // 默认隐藏
+    }
+    
+    /**
+     * 切换搜索面板的显示/隐藏
+     */
+    private void toggleSearchPanel() {
+        if (searchPanel.isVisible()) {
+            // 隐藏搜索面板
+            searchPanel.setVisible(false);
+            getContentPane().remove(searchPanel);
+            clearSearchHighlights();
+            bodyArea.requestFocusInWindow();
+            getContentPane().revalidate();
+            getContentPane().repaint();
+        } else {
+            // 显示搜索面板
+            // 将搜索面板添加到顶部,无论是否在预览模式
+            getContentPane().add(searchPanel, BorderLayout.NORTH);
+            searchPanel.setVisible(true);
+            searchField.requestFocusInWindow();
+            searchField.selectAll();
+            getContentPane().revalidate();
+            getContentPane().repaint();
+        }
+    }
+    
+    /**
+     * 执行搜索
+     */
+    private void performSearch() {
+        String keyword = searchField.getText();
+        clearSearchHighlights();
+        searchMatchPositions.clear();
+        currentSearchIndex = -1;
+        
+        if (keyword.isEmpty()) {
+            searchResultLabel.setText("");
+            return;
+        }
+        
+        String text = bodyArea.getText().toLowerCase();
+        String searchText = keyword.toLowerCase();
+        int pos = 0;
+        
+        while ((pos = text.indexOf(searchText, pos)) >= 0) {
+            searchMatchPositions.add(pos);
+            try {
+                Object tag = bodyArea.getHighlighter().addHighlight(
+                    pos, pos + keyword.length(), searchHighlightPainter);
+                searchHighlightTags.add(tag);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            pos += searchText.length();
+        }
+        
+        if (searchMatchPositions.isEmpty()) {
+            searchResultLabel.setText("未找到");
+        } else {
+            currentSearchIndex = 0;
+            highlightCurrentMatch();
+            searchResultLabel.setText("1/" + searchMatchPositions.size());
+        }
+    }
+    
+    /**
+     * 查找下一个匹配项
+     */
+    private void findNext() {
+        if (searchMatchPositions.isEmpty()) return;
+        
+        currentSearchIndex = (currentSearchIndex + 1) % searchMatchPositions.size();
+        highlightCurrentMatch();
+        searchResultLabel.setText((currentSearchIndex + 1) + "/" + searchMatchPositions.size());
+    }
+    
+    /**
+     * 查找上一个匹配项
+     */
+    private void findPrevious() {
+        if (searchMatchPositions.isEmpty()) return;
+        
+        currentSearchIndex = (currentSearchIndex - 1 + searchMatchPositions.size()) % searchMatchPositions.size();
+        highlightCurrentMatch();
+        searchResultLabel.setText((currentSearchIndex + 1) + "/" + searchMatchPositions.size());
+    }
+    
+    /**
+     * 高亮显示当前匹配项
+     */
+    private void highlightCurrentMatch() {
+        if (currentSearchIndex < 0 || currentSearchIndex >= searchMatchPositions.size()) return;
+        
+        int pos = searchMatchPositions.get(currentSearchIndex);
+        bodyArea.setCaretPosition(pos);
+        try {
+            bodyArea.scrollRectToVisible(bodyArea.modelToView2D(pos).getBounds());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * 清除所有搜索高亮
+     */
+    private void clearSearchHighlights() {
+        for (Object tag : searchHighlightTags) {
+            bodyArea.getHighlighter().removeHighlight(tag);
+        }
+        searchHighlightTags.clear();
     }
 }
 
