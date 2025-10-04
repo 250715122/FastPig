@@ -315,6 +315,22 @@ public class UnifiedNoteAppFrame extends JFrame {
                 bodyArea.replaceSelection("$$\n\n$$\n");
             }
         });
+        // 列表缩进/反缩进与续项
+        KeyStroke ksTab = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_TAB, 0);
+        KeyStroke ksShiftTab = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_TAB, java.awt.event.InputEvent.SHIFT_DOWN_MASK);
+        KeyStroke ksEnter = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ENTER, 0);
+        bodyArea.getInputMap(JComponent.WHEN_FOCUSED).put(ksTab, "listIndent");
+        bodyArea.getActionMap().put("listIndent", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ indentSelection(true); }
+        });
+        bodyArea.getInputMap(JComponent.WHEN_FOCUSED).put(ksShiftTab, "listOutdent");
+        bodyArea.getActionMap().put("listOutdent", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ indentSelection(false); }
+        });
+        bodyArea.getInputMap(JComponent.WHEN_FOCUSED).put(ksEnter, "listNewline");
+        bodyArea.getActionMap().put("listNewline", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ continueListWithEnter(); }
+        });
         // Ctrl+B 加粗
         KeyStroke ksBold = KeyStroke.getKeyStroke('B', java.awt.event.InputEvent.CTRL_DOWN_MASK);
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksBold, "boldSelection");
@@ -1640,6 +1656,82 @@ public class UnifiedNoteAppFrame extends JFrame {
             }
             bodyArea.setText(before + sb.toString() + after);
             bodyArea.select(lineStart, lineStart + sb.length());
+        }catch(Exception ignored){}
+    }
+
+    // ===== 列表缩进/续项 =====
+    private static final String INDENT = "  "; // 每层两个空格
+
+    private boolean isListLine(String s){
+        return s.matches("^\\s{0,100}([-+*]|\\d+\\.)\\s+.*$");
+    }
+
+    private void indentSelection(boolean indent){
+        try{
+            int start = bodyArea.getSelectionStart();
+            int end = bodyArea.getSelectionEnd();
+            int lineStart = bodyArea.getText().lastIndexOf('\n', Math.max(0, start-1)) + 1;
+            int lineEnd = bodyArea.getText().indexOf('\n', end);
+            if (lineEnd < 0) lineEnd = bodyArea.getText().length();
+            String before = bodyArea.getText().substring(0, lineStart);
+            String lines = bodyArea.getText().substring(lineStart, lineEnd);
+            String after = bodyArea.getText().substring(lineEnd);
+
+            String[] arr = lines.split("\n", -1);
+            StringBuilder sb = new StringBuilder();
+            for (int i=0;i<arr.length;i++){
+                String l = arr[i];
+                if (isListLine(l)){
+                    if (indent) {
+                        l = INDENT + l;
+                    } else {
+                        if (l.startsWith(INDENT)) l = l.substring(INDENT.length());
+                        else l = l.replaceFirst("^\\s{1,2}", "");
+                    }
+                }
+                sb.append(l);
+                if (i < arr.length-1) sb.append('\n');
+            }
+            bodyArea.setText(before + sb.toString() + after);
+            bodyArea.select(lineStart, lineStart + sb.length());
+        }catch(Exception ignored){}
+    }
+
+    private void continueListWithEnter(){
+        try{
+            int caret = bodyArea.getCaretPosition();
+            int lineStart = bodyArea.getText().lastIndexOf('\n', Math.max(0, caret-1)) + 1;
+            int lineEnd = bodyArea.getText().indexOf('\n', caret);
+            if (lineEnd < 0) lineEnd = bodyArea.getText().length();
+            String line = bodyArea.getText().substring(lineStart, lineEnd);
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(\\s*)([-+*]|(\\d+)\\.)\\s*$").matcher(line);
+            // 若当前行只有标记与空格，回车则删除标记并换行（退出列表）
+            if (m.find()){
+                String indent = m.group(1)==null?"":m.group(1);
+                bodyArea.replaceRange("\n", lineStart, lineEnd);
+                bodyArea.setCaretPosition(lineStart + 1);
+                return;
+            }
+            // 正常续项：复制前导空白与标记
+            m = java.util.regex.Pattern.compile("^(\\s*)([-+*]|(\\d+)\\.)\\s+.*$").matcher(line);
+            if (m.find()){
+                String indent = m.group(1)==null?"":m.group(1);
+                String bullet = m.group(2);
+                String num = m.group(3);
+                String next;
+                if (num != null){
+                    int n = Integer.parseInt(num);
+                    next = indent + (n+1) + ". ";
+                } else {
+                    next = indent + bullet + " ";
+                }
+                bodyArea.insert("\n" + next, caret);
+                bodyArea.setCaretPosition(caret + 1 + next.length());
+            } else {
+                // 非列表行，执行默认换行
+                bodyArea.insert("\n", caret);
+                bodyArea.setCaretPosition(caret + 1);
+            }
         }catch(Exception ignored){}
     }
 }
