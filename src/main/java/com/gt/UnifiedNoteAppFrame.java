@@ -360,6 +360,21 @@ public class UnifiedNoteAppFrame extends JFrame {
                 return false;
             }
         });
+        // 选区悬浮工具条（Ctrl+E 手动触发；有选区时自动出现）
+        initSelectionToolbar();
+        bodyArea.addCaretListener(e -> {
+            if (!selectionToolbarInitialized) return;
+            if (bodyArea.getSelectionStart() != bodyArea.getSelectionEnd()) {
+                showSelectionToolbarAtSelection();
+            } else {
+                if (selectionToolbar != null) selectionToolbar.setVisible(false);
+            }
+        });
+        KeyStroke ksToggleSel = KeyStroke.getKeyStroke('E', java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksToggleSel, "toggleSelectionToolbar");
+        root.getActionMap().put("toggleSelectionToolbar", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ toggleSelectionToolbar(); }
+        });
     }
 
     private boolean previewVisible = false;
@@ -379,6 +394,9 @@ public class UnifiedNoteAppFrame extends JFrame {
     // 保持最近激活实例，便于全局热键调用
     private static volatile UnifiedNoteAppFrame ACTIVE;
     public static UnifiedNoteAppFrame getActiveInstance() { return ACTIVE; }
+    // 选区悬浮工具条
+    private JPopupMenu selectionToolbar;
+    private boolean selectionToolbarInitialized = false;
     
     /**
      * 让主编辑区获得焦点
@@ -1505,6 +1523,92 @@ public class UnifiedNoteAppFrame extends JFrame {
             bodyArea.getHighlighter().removeHighlight(tag);
         }
         searchHighlightTags.clear();
+    }
+
+    // ===== 选区悬浮工具条 =====
+    private void initSelectionToolbar(){
+        if (selectionToolbarInitialized) return;
+        selectionToolbar = new JPopupMenu();
+        selectionToolbar.setBorder(BorderFactory.createLineBorder(new Color(200,200,200)));
+
+        addSelItem(selectionToolbar, "加粗", () -> wrapSelection("**", "**"));
+        addSelItem(selectionToolbar, "斜体", () -> wrapSelection("*", "*"));
+        addSelItem(selectionToolbar, "删除线", () -> wrapSelection("~~", "~~"));
+        selectionToolbar.addSeparator();
+        addSelItem(selectionToolbar, "H1", () -> prefixLineSelection("# "));
+        addSelItem(selectionToolbar, "H2", () -> prefixLineSelection("## "));
+        addSelItem(selectionToolbar, "H3", () -> prefixLineSelection("### "));
+        selectionToolbar.addSeparator();
+        addSelItem(selectionToolbar, "行内代码", () -> wrapSelection("`", "`"));
+        addSelItem(selectionToolbar, "代码块", () -> wrapSelection("```\n", "\n```"));
+        selectionToolbar.addSeparator();
+        addSelItem(selectionToolbar, "链接", () -> wrapSelection("[", "](url)"));
+        addSelItem(selectionToolbar, "图片", () -> wrapSelection("![", "](url)"));
+        selectionToolbar.addSeparator();
+        // 颜色预设
+        addSelItem(selectionToolbar, "红字", () -> wrapSelection("<span style=\"color:#e53935\">", "</span>"));
+        addSelItem(selectionToolbar, "黄底", () -> wrapSelection("<span style=\"background:yellow\">", "</span>"));
+        addSelItem(selectionToolbar, "蓝字", () -> wrapSelection("<span style=\"color:#1890ff\">", "</span>"));
+
+        selectionToolbarInitialized = true;
+    }
+
+    private void addSelItem(JPopupMenu menu, String text, Runnable action){
+        JMenuItem item = new JMenuItem(text);
+        item.addActionListener(e -> { action.run(); bodyArea.requestFocusInWindow(); });
+        menu.add(item);
+    }
+
+    private void toggleSelectionToolbar(){
+        if (!selectionToolbarInitialized) initSelectionToolbar();
+        if (selectionToolbar.isVisible()) selectionToolbar.setVisible(false);
+        else showSelectionToolbarAtSelection();
+    }
+
+    private void showSelectionToolbarAtSelection(){
+        try{
+            int pos = Math.max(0, Math.min(bodyArea.getSelectionEnd(), bodyArea.getDocument().getLength()));
+            Rectangle r = bodyArea.modelToView(pos);
+            if (r == null) return;
+            int x = r.x + 4;
+            int y = r.y + r.height + 2;
+            selectionToolbar.show(bodyArea, x, y);
+        }catch(Exception ignored){}
+    }
+
+    private void wrapSelection(String left, String right){
+        try{
+            int start = bodyArea.getSelectionStart();
+            int end = bodyArea.getSelectionEnd();
+            if (start == end) return;
+            String sel = bodyArea.getSelectedText();
+            bodyArea.replaceRange(left + sel + right, start, end);
+            bodyArea.select(start + left.length(), start + left.length() + sel.length());
+        }catch(Exception ignored){}
+    }
+
+    private void prefixLineSelection(String prefix){
+        try{
+            int start = bodyArea.getSelectionStart();
+            int end = bodyArea.getSelectionEnd();
+            int lineStart = bodyArea.getText().lastIndexOf('\n', Math.max(0, start-1)) + 1;
+            int lineEnd = bodyArea.getText().indexOf('\n', end);
+            if (lineEnd < 0) lineEnd = bodyArea.getText().length();
+            String before = bodyArea.getText().substring(0, lineStart);
+            String lines = bodyArea.getText().substring(lineStart, lineEnd);
+            String after = bodyArea.getText().substring(lineEnd);
+            String[] arr = lines.split("\n", -1);
+            StringBuilder sb = new StringBuilder();
+            for (int i=0;i<arr.length;i++){
+                String l = arr[i];
+                // 去掉已有的 # 前缀再加，避免重复
+                String t = l.replaceFirst("^#{1,6}\\s+", "");
+                sb.append(prefix).append(t);
+                if (i < arr.length-1) sb.append('\n');
+            }
+            bodyArea.setText(before + sb.toString() + after);
+            bodyArea.select(lineStart, lineStart + sb.length());
+        }catch(Exception ignored){}
     }
 }
 
