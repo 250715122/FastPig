@@ -315,6 +315,34 @@ public class UnifiedNoteAppFrame extends JFrame {
                 bodyArea.replaceSelection("$$\n\n$$\n");
             }
         });
+        // Ctrl+B 加粗
+        KeyStroke ksBold = KeyStroke.getKeyStroke('B', java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksBold, "boldSelection");
+        root.getActionMap().put("boldSelection", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ wrapSelection("**", "**"); }
+        });
+        // Ctrl+R 标红
+        KeyStroke ksRed = KeyStroke.getKeyStroke('R', java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksRed, "redSelection");
+        root.getActionMap().put("redSelection", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ wrapSelection("<span style=\"color:#e53935\">", "</span>"); }
+        });
+        // Ctrl+1..5 标题级别
+        KeyStroke ksH1 = KeyStroke.getKeyStroke('1', java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        KeyStroke ksH2 = KeyStroke.getKeyStroke('2', java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        KeyStroke ksH3 = KeyStroke.getKeyStroke('3', java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        KeyStroke ksH4 = KeyStroke.getKeyStroke('4', java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        KeyStroke ksH5 = KeyStroke.getKeyStroke('5', java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksH1, "h1Selection");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksH2, "h2Selection");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksH3, "h3Selection");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksH4, "h4Selection");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksH5, "h5Selection");
+        root.getActionMap().put("h1Selection", new AbstractAction(){ @Override public void actionPerformed(ActionEvent e){ prefixLineSelection("# "); }});
+        root.getActionMap().put("h2Selection", new AbstractAction(){ @Override public void actionPerformed(ActionEvent e){ prefixLineSelection("## "); }});
+        root.getActionMap().put("h3Selection", new AbstractAction(){ @Override public void actionPerformed(ActionEvent e){ prefixLineSelection("### "); }});
+        root.getActionMap().put("h4Selection", new AbstractAction(){ @Override public void actionPerformed(ActionEvent e){ prefixLineSelection("#### "); }});
+        root.getActionMap().put("h5Selection", new AbstractAction(){ @Override public void actionPerformed(ActionEvent e){ prefixLineSelection("##### "); }});
         // Alt+S 同步数据库到云端已改为全局热键，在 HotKeyManager 中处理
         // Esc 关闭补全
         KeyStroke ksEsc = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0);
