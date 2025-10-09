@@ -319,6 +319,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         KeyStroke ksTab = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_TAB, 0);
         KeyStroke ksShiftTab = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_TAB, java.awt.event.InputEvent.SHIFT_DOWN_MASK);
         KeyStroke ksEnter = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ENTER, 0);
+        bodyArea.setFocusTraversalKeysEnabled(false); // 确保 Tab 由编辑器处理，不做焦点跳转
         bodyArea.getInputMap(JComponent.WHEN_FOCUSED).put(ksTab, "listIndent");
         bodyArea.getActionMap().put("listIndent", new AbstractAction(){
             @Override public void actionPerformed(ActionEvent e){ indentSelection(true); }
@@ -1679,21 +1680,39 @@ public class UnifiedNoteAppFrame extends JFrame {
 
             String[] arr = lines.split("\n", -1);
             StringBuilder sb = new StringBuilder();
+            int deltaFirst = 0; // 第一行光标偏移
+            int deltaTotal = 0; // 全部选区长度变化
             for (int i=0;i<arr.length;i++){
                 String l = arr[i];
                 if (isListLine(l)){
                     if (indent) {
                         l = INDENT + l;
+                        deltaTotal += INDENT.length();
+                        if (i==0) deltaFirst += INDENT.length();
                     } else {
-                        if (l.startsWith(INDENT)) l = l.substring(INDENT.length());
-                        else l = l.replaceFirst("^\\s{1,2}", "");
+                        if (l.startsWith(INDENT)) {
+                            l = l.substring(INDENT.length());
+                            deltaTotal -= INDENT.length();
+                            if (i==0) deltaFirst -= INDENT.length();
+                        } else {
+                            int beforeLen = l.length();
+                            l = l.replaceFirst("^\\s{1,2}", "");
+                            int removed = beforeLen - l.length();
+                            deltaTotal -= removed;
+                            if (i==0) deltaFirst -= removed;
+                        }
                     }
                 }
                 sb.append(l);
                 if (i < arr.length-1) sb.append('\n');
             }
-            bodyArea.setText(before + sb.toString() + after);
-            bodyArea.select(lineStart, lineStart + sb.length());
+            bodyArea.replaceRange(sb.toString(), lineStart, lineEnd);
+            // 恢复合理的选区：如果原本有选区，保持原始覆盖范围；若无选区，仅移动插入点
+            if (start != end) {
+                bodyArea.select(lineStart, lineStart + sb.length());
+            } else {
+                bodyArea.setCaretPosition(start + deltaFirst);
+            }
         }catch(Exception ignored){}
     }
 
@@ -1725,12 +1744,13 @@ public class UnifiedNoteAppFrame extends JFrame {
                 } else {
                     next = indent + bullet + " ";
                 }
-                bodyArea.insert("\n" + next, caret);
-                bodyArea.setCaretPosition(caret + 1 + next.length());
+                // 避免触发任何弹出菜单：仅插入文本并恢复焦点
+                bodyArea.replaceSelection("\n" + next);
+                bodyArea.requestFocusInWindow();
             } else {
                 // 非列表行，执行默认换行
-                bodyArea.insert("\n", caret);
-                bodyArea.setCaretPosition(caret + 1);
+                bodyArea.replaceSelection("\n");
+                bodyArea.requestFocusInWindow();
             }
         }catch(Exception ignored){}
     }
