@@ -28,6 +28,7 @@ import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.util.ast.Node;
 import com.vladsch.flexmark.util.data.MutableDataSet;
 import com.vladsch.flexmark.ext.tables.TablesExtension;
+import com.vladsch.flexmark.ext.attributes.AttributesExtension;
 import com.vladsch.flexmark.util.misc.Extension;
 import java.util.Arrays;
 import com.vladsch.flexmark.html2md.converter.FlexmarkHtmlConverter;
@@ -450,6 +451,8 @@ public class UnifiedNoteAppFrame extends JFrame {
     // 选区悬浮工具条
     private JPopupMenu selectionToolbar;
     private boolean selectionToolbarInitialized = false;
+    // 记住文本组件原始的 TransferHandler，用于保持复制/剪切等行为
+    private TransferHandler originalTransferHandler;
     
     /**
      * 让主编辑区获得焦点
@@ -517,7 +520,9 @@ public class UnifiedNoteAppFrame extends JFrame {
         String mdWithImgs = replaceAllLatexWithImages(md);
         // 将所有 Mermaid 代码块替换为图片
         mdWithImgs = replaceAllMermaidWithImages(mdWithImgs);
-        String html = renderMarkdown(mdWithImgs);
+        // 规范化将标题后的 (#id) 转为 {#id}
+        String normalized = normalizeHeadingAnchors(mdWithImgs);
+        String html = renderMarkdown(normalized);
         try {
             String snippet = mdWithImgs.length() > 200 ? mdWithImgs.substring(0, 200) + "..." : mdWithImgs;
             System.out.println("[预览] Markdown 片段: \n" + snippet);
@@ -613,8 +618,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         MutableDataSet opts = new MutableDataSet();
         // 关键：将软换行渲染为 <br/>，避免 JEditorPane 折叠换行
         opts.set(HtmlRenderer.SOFT_BREAK, "<br/>");
-        // 启用表格扩展
-        opts.set(Parser.EXTENSIONS, Arrays.asList(TablesExtension.create()));
+        // 启用表格与属性扩展（属性用于 {#id} 锚点）
+        opts.set(Parser.EXTENSIONS, Arrays.asList(TablesExtension.create(), AttributesExtension.create()));
         Parser parser = Parser.builder(opts).build();
         HtmlRenderer renderer = HtmlRenderer.builder(opts).build();
         Node doc = parser.parse(md == null ? "" : md);
@@ -662,6 +667,25 @@ public class UnifiedNoteAppFrame extends JFrame {
                 if (!t.startsWith("|")) t = "|" + t;
                 if (!t.endsWith("|")) t = t + "|";
                 out.append(t).append('\n');
+            } else {
+                out.append(line).append('\n');
+            }
+        }
+        return out.toString();
+    }
+
+    // 将 “## 标题 (#id)” 规范化为 “## 标题 {#id}”，便于 AttributesExtension 识别
+    private String normalizeHeadingAnchors(String src){
+        if (src == null || src.isEmpty()) return src;
+        String[] lines = src.split("\n", -1);
+        StringBuilder out = new StringBuilder(src.length());
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("^(#{1,6}\\s+.*)\\s\\(#([A-Za-z0-9_-]+)\\)\\s*$");
+        for (String line : lines){
+            java.util.regex.Matcher m = p.matcher(line);
+            if (m.find()){
+                String left = m.group(1);
+                String id = m.group(2);
+                out.append(left).append(' ').append("{#").append(id).append("}").append('\n');
             } else {
                 out.append(line).append('\n');
             }
@@ -1586,6 +1610,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         // 关键：工具条不抢焦点，避免打断 Shift+方向键的连续选择
         selectionToolbar.setFocusable(false);
 
+        addSelItem(selectionToolbar, "复制", () -> bodyArea.copy());
+        selectionToolbar.addSeparator();
         addSelItem(selectionToolbar, "加粗", () -> wrapSelection("**", "**"));
         addSelItem(selectionToolbar, "斜体", () -> wrapSelection("*", "*"));
         addSelItem(selectionToolbar, "删除线", () -> wrapSelection("~~", "~~"));
@@ -1790,7 +1816,16 @@ public class UnifiedNoteAppFrame extends JFrame {
             @Override public void actionPerformed(ActionEvent e){ doPasteWithChoice(true); }
         });
         // 同时设置 TransferHandler 作为兜底（支持鼠标粘贴）
+        originalTransferHandler = bodyArea.getTransferHandler();
         bodyArea.setTransferHandler(new TransferHandler(){
+            @Override public void exportToClipboard(JComponent c, java.awt.datatransfer.Clipboard clip, int action){
+                if (originalTransferHandler != null) originalTransferHandler.exportToClipboard(c, clip, action);
+                else super.exportToClipboard(c, clip, action);
+            }
+            @Override public int getSourceActions(JComponent c){
+                if (originalTransferHandler != null) return originalTransferHandler.getSourceActions(c);
+                return COPY_OR_MOVE;
+            }
             @Override public boolean importData(JComponent comp, Transferable t){
                 try{
                     String plain = t.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.stringFlavor)
@@ -1830,8 +1865,9 @@ public class UnifiedNoteAppFrame extends JFrame {
 
             // 弹窗选择
             Object[] options = {"保留样式(转为Markdown)", "仅粘贴纯文本", "保留原始HTML(完整样式)", "取消"};
+            int defaultIdx = 0; // 默认“保留样式(转为Markdown)”
             int opt = JOptionPane.showOptionDialog(this, "检测到富文本，如何粘贴？", "粘贴选项",
-                    JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
+                    JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[defaultIdx]);
             if (opt == 3 || opt == JOptionPane.CLOSED_OPTION) return; // 取消
             if (opt == 1){ // 纯文本
                 if (plain != null) bodyArea.replaceSelection(plain); else bodyArea.paste();
@@ -1845,6 +1881,21 @@ public class UnifiedNoteAppFrame extends JFrame {
             // 默认：HTML->Markdown
             doPasteFromHtml(html, true);
         }catch(Exception ex){ bodyArea.paste(); }
+    }
+
+    private boolean looksLikeMarkdown(String s){
+        if (s == null) return false;
+        String sample = s.length() > 4000 ? s.substring(0, 4000) : s;
+        int nl = 0; for (int i=0;i<sample.length();i++){ if (sample.charAt(i)=='\n') nl++; }
+        int score = 0;
+        if (sample.contains("```")) score += 2;
+        if (sample.matches("(?s).*(^|\n)#{1,6}\\s+.*")) score += 2;
+        if (sample.matches("(?s).*(^|\n)(-|\\*|\\+)\\s+.*")) score += 1;
+        if (sample.matches("(?s).*(^|\n)\\d+\\.\\s+.*")) score += 1;
+        if (sample.contains("**") || sample.contains("_")) score += 1;
+        if (sample.contains("|")) score += 1; // 可能是表格
+        if (nl >= 2) score += 1; // 多行文本
+        return score >= 3;
     }
 
     private boolean doPasteFromHtml(String html, boolean fromDialog){
