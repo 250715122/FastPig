@@ -78,6 +78,13 @@
 		    <version>0.64.8</version>
 		</dependency>
 
+		<!-- HTML -> Markdown 转换（用于粘贴保留样式） -->
+		<dependency>
+		    <groupId>com.vladsch.flexmark</groupId>
+		    <artifactId>flexmark-html2md-converter</artifactId>
+		    <version>0.64.8</version>
+		</dependency>
+
 
 		<!-- JLaTeXMath for离线公式渲染到图片（适配JDK8） -->
 		<dependency>

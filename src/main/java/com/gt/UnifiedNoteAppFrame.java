@@ -26,6 +26,8 @@ import com.vladsch.flexmark.util.data.MutableDataSet;
 import com.vladsch.flexmark.ext.tables.TablesExtension;
 import com.vladsch.flexmark.util.misc.Extension;
 import java.util.Arrays;
+import com.vladsch.flexmark.html2md.converter.FlexmarkHtmlConverter;
+import java.awt.datatransfer.Transferable;
 import org.scilab.forge.jlatexmath.TeXConstants;
 import org.scilab.forge.jlatexmath.TeXFormula;
 import org.scilab.forge.jlatexmath.TeXIcon;
@@ -34,7 +36,7 @@ public class UnifiedNoteAppFrame extends JFrame {
     private final NoteRepository repository;
     private TrayIcon trayIcon; // 系统托盘图标
 
-    // 首行承载“快捷命令 空格 描述”，不再使用独立的输入框
+    // 首行承载"快捷命令 空格 描述"，不再使用独立的输入框
     private final JPopupMenu suggestPopup = new JPopupMenu();
     private final DefaultListModel<String> suggestModel = new DefaultListModel<>();
     private final JList<String> suggestList = new JList<>(suggestModel);
@@ -232,7 +234,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         // 自动保存：3秒去抖
         javax.swing.Timer autosaveTimer = new javax.swing.Timer(3000, e -> {
             if (!isFirstLineStructured()) {
-                // 首行未形成“key 空格 desc”，不执行自动保存
+                // 首行未形成"key 空格 desc"，不执行自动保存
                 return;
             }
             saveUnified(false);
@@ -407,6 +409,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         });
         // 选区悬浮工具条（Ctrl+E 手动触发；有选区时自动出现）
         initSelectionToolbar();
+        // 安装粘贴处理：Ctrl+V 弹窗选择，Ctrl+Shift+V 纯文本
+        installPasteHandlers(root);
         bodyArea.addCaretListener(e -> {
             if (!selectionToolbarInitialized) return;
             if (bodyArea.getSelectionStart() != bodyArea.getSelectionEnd()) {
@@ -784,7 +788,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         int sp = s.indexOf(' ');
         if (sp > 0) { key = s.substring(0, sp).trim(); desc = s.substring(sp+1).trim(); }
         else { key = s.trim(); }
-        // 替换首行为“key 空格 desc”，其余正文保持
+        // 替换首行为"key 空格 desc"，其余正文保持
         String text = bodyArea.getText();
         int nl = text.indexOf('\n');
         String rest = nl >= 0 ? text.substring(nl) : "";
@@ -1765,6 +1769,104 @@ public class UnifiedNoteAppFrame extends JFrame {
                 bodyArea.requestFocusInWindow();
             }
         }catch(Exception ignored){}
+    }
+
+    // ===== 粘贴处理 =====
+    private void installPasteHandlers(JRootPane root){
+        // Ctrl+V：拦截并弹出选择
+        KeyStroke ksPaste = KeyStroke.getKeyStroke('V', java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksPaste, "pasteWithChoice");
+        root.getActionMap().put("pasteWithChoice", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ doPasteWithChoice(false); }
+        });
+        // Ctrl+Shift+V：直接纯文本
+        KeyStroke ksPastePlain = KeyStroke.getKeyStroke('V', java.awt.event.InputEvent.CTRL_DOWN_MASK | java.awt.event.InputEvent.SHIFT_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksPastePlain, "pastePlain");
+        root.getActionMap().put("pastePlain", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ doPasteWithChoice(true); }
+        });
+        // 同时设置 TransferHandler 作为兜底（支持鼠标粘贴）
+        bodyArea.setTransferHandler(new TransferHandler(){
+            @Override public boolean importData(JComponent comp, Transferable t){
+                try{
+                    String plain = t.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.stringFlavor)
+                            ? (String) t.getTransferData(java.awt.datatransfer.DataFlavor.stringFlavor) : null;
+                    String html = null;
+                    for (java.awt.datatransfer.DataFlavor f : t.getTransferDataFlavors()){
+                        if ("text/html".equalsIgnoreCase(f.getMimeType().split(";")[0])){
+                            Object d = t.getTransferData(f);
+                            html = d==null? null : d.toString();
+                            break;
+                        }
+                    }
+                    if (html != null){
+                        // 鼠标粘贴默认走弹窗逻辑
+                        return doPasteFromHtml(html, false);
+                    } else if (plain != null){
+                        bodyArea.replaceSelection(plain);
+                        return true;
+                    }
+                }catch(Exception ignored){}
+                return false;
+            }
+            @Override public boolean canImport(JComponent comp, java.awt.datatransfer.DataFlavor[] flavors){
+                return true;
+            }
+        });
+    }
+
+    private void doPasteWithChoice(boolean forcePlain){
+        try{
+            java.awt.datatransfer.Clipboard cb = Toolkit.getDefaultToolkit().getSystemClipboard();
+            Transferable t = cb.getContents(null);
+            if (t == null){ bodyArea.paste(); return; }
+            String html = null;
+            for (java.awt.datatransfer.DataFlavor f : t.getTransferDataFlavors()){
+                try{
+                    if ("text/html".equalsIgnoreCase(f.getMimeType().split(";")[0])){
+                        Object d = t.getTransferData(f);
+                        html = d==null? null : d.toString();
+                        break;
+                    }
+                }catch(Exception ignore){}
+            }
+            String plain = t.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.stringFlavor)
+                    ? (String) t.getTransferData(java.awt.datatransfer.DataFlavor.stringFlavor) : null;
+
+            if (forcePlain || html == null){
+                if (plain != null) bodyArea.replaceSelection(plain);
+                else bodyArea.paste();
+                return;
+            }
+
+            // 弹窗选择
+            Object[] options = {"保留样式(转为Markdown)", "仅粘贴纯文本", "取消"};
+            int opt = JOptionPane.showOptionDialog(this, "检测到富文本，如何粘贴？", "粘贴选项",
+                    JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
+            if (opt == JOptionPane.CANCEL_OPTION || opt == JOptionPane.CLOSED_OPTION) return;
+            if (opt == JOptionPane.NO_OPTION){
+                if (plain != null) bodyArea.replaceSelection(plain); else bodyArea.paste();
+                return;
+            }
+            doPasteFromHtml(html, true);
+        }catch(Exception ex){ bodyArea.paste(); }
+    }
+
+    private boolean doPasteFromHtml(String html, boolean fromDialog){
+        try{
+            // HTML -> Markdown
+            String md = FlexmarkHtmlConverter.builder().build().convert(html);
+            // 简单规整：将 <img> 标签转换为 Markdown（html2md 已处理大多数情况）
+            md = md.replaceAll("!\\[\\]\\((data:[^)]+)\\)", ""); // 丢弃 data URI 大图
+            bodyArea.replaceSelection(md);
+            return true;
+        }catch(Exception ex){
+            if (fromDialog){ JOptionPane.showMessageDialog(this, "转换失败，已退回纯文本", "提示", JOptionPane.WARNING_MESSAGE); }
+            try{
+                bodyArea.paste();
+            }catch(Exception ignored){}
+            return false;
+        }
     }
 }
 
