@@ -1664,7 +1664,8 @@ public class UnifiedNoteAppFrame extends JFrame {
     private static final String INDENT = "  "; // 每层两个空格
 
     private boolean isListLine(String s){
-        return s.matches("^\\s{0,100}([-+*]|\\d+\\.)\\s+.*$");
+        // 支持："- ", "+ ", "* ", "1. ", 以及后续带内容的情形
+        return s.matches("^\\s{0,100}(([-+*])|(\\d+\\.))(?:\\s*$|\\s+.*$)");
     }
 
     private void indentSelection(boolean indent){
@@ -1682,9 +1683,11 @@ public class UnifiedNoteAppFrame extends JFrame {
             StringBuilder sb = new StringBuilder();
             int deltaFirst = 0; // 第一行光标偏移
             int deltaTotal = 0; // 全部选区长度变化
+            boolean hasListLine = false;
             for (int i=0;i<arr.length;i++){
                 String l = arr[i];
                 if (isListLine(l)){
+                    hasListLine = true;
                     if (indent) {
                         l = INDENT + l;
                         deltaTotal += INDENT.length();
@@ -1706,8 +1709,14 @@ public class UnifiedNoteAppFrame extends JFrame {
                 sb.append(l);
                 if (i < arr.length-1) sb.append('\n');
             }
+            if (!hasListLine){
+                // 非列表行：保持默认体验，Tab 插入制表符（Shift+Tab 不做任何事）
+                if (indent){
+                    bodyArea.replaceSelection("\t");
+                } // outdent on non-list lines: 忽略，避免破坏普通文本
+                return;
+            }
             bodyArea.replaceRange(sb.toString(), lineStart, lineEnd);
-            // 恢复合理的选区：如果原本有选区，保持原始覆盖范围；若无选区，仅移动插入点
             if (start != end) {
                 bodyArea.select(lineStart, lineStart + sb.length());
             } else {
