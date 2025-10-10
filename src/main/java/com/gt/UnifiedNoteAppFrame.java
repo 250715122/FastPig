@@ -1586,6 +1586,9 @@ public class UnifiedNoteAppFrame extends JFrame {
         addSelItem(selectionToolbar, "H2", () -> prefixLineSelection("## "));
         addSelItem(selectionToolbar, "H3", () -> prefixLineSelection("### "));
         selectionToolbar.addSeparator();
+        addSelItem(selectionToolbar, "无序列表", () -> prefixLineSelection("- "));
+        addSelItem(selectionToolbar, "有序列表", () -> prefixLineSelection("1. "));
+        selectionToolbar.addSeparator();
         addSelItem(selectionToolbar, "行内代码", () -> wrapSelection("`", "`"));
         addSelItem(selectionToolbar, "代码块", () -> wrapSelection("```\n", "\n```"));
         selectionToolbar.addSeparator();
