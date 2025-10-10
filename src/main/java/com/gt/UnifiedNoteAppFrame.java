@@ -18,6 +18,10 @@ import javax.swing.event.UndoableEditEvent;
 import javax.swing.event.UndoableEditListener;
 import javax.swing.undo.UndoManager;
 import java.io.File;
+import java.io.Reader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.html.HtmlRenderer;
@@ -1791,14 +1795,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                 try{
                     String plain = t.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.stringFlavor)
                             ? (String) t.getTransferData(java.awt.datatransfer.DataFlavor.stringFlavor) : null;
-                    String html = null;
-                    for (java.awt.datatransfer.DataFlavor f : t.getTransferDataFlavors()){
-                        if ("text/html".equalsIgnoreCase(f.getMimeType().split(";")[0])){
-                            Object d = t.getTransferData(f);
-                            html = d==null? null : d.toString();
-                            break;
-                        }
-                    }
+                    String html = extractClipboardHtml(t);
                     if (html != null){
                         // 鼠标粘贴默认走弹窗逻辑
                         return doPasteFromHtml(html, false);
@@ -1820,16 +1817,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             java.awt.datatransfer.Clipboard cb = Toolkit.getDefaultToolkit().getSystemClipboard();
             Transferable t = cb.getContents(null);
             if (t == null){ bodyArea.paste(); return; }
-            String html = null;
-            for (java.awt.datatransfer.DataFlavor f : t.getTransferDataFlavors()){
-                try{
-                    if ("text/html".equalsIgnoreCase(f.getMimeType().split(";")[0])){
-                        Object d = t.getTransferData(f);
-                        html = d==null? null : d.toString();
-                        break;
-                    }
-                }catch(Exception ignore){}
-            }
+            String html = extractClipboardHtml(t);
             String plain = t.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.stringFlavor)
                     ? (String) t.getTransferData(java.awt.datatransfer.DataFlavor.stringFlavor) : null;
 
@@ -1867,6 +1855,32 @@ public class UnifiedNoteAppFrame extends JFrame {
             }catch(Exception ignored){}
             return false;
         }
+    }
+
+    private static String readAll(Reader r) throws java.io.IOException{
+        StringBuilder sb = new StringBuilder();
+        char[] buf = new char[4096];
+        int n;
+        while((n = r.read(buf)) != -1){ sb.append(buf, 0, n); }
+        return sb.toString();
+    }
+
+    private String extractClipboardHtml(Transferable t){
+        try{
+            for (java.awt.datatransfer.DataFlavor f : t.getTransferDataFlavors()){
+                String mime = f.getMimeType();
+                if (mime == null) continue;
+                String base = mime.split(";",2)[0].trim().toLowerCase();
+                if (!"text/html".equals(base)) continue;
+                Object data = t.getTransferData(f);
+                if (data == null) continue;
+                if (data instanceof String) return (String) data;
+                if (data instanceof Reader) return readAll((Reader) data);
+                if (data instanceof InputStream) return readAll(new InputStreamReader((InputStream) data, StandardCharsets.UTF_8));
+                // 其它类型不支持，继续尝试下一个 flavor
+            }
+        }catch(Exception ignored){}
+        return null;
     }
 }
 
