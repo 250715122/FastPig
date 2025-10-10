@@ -1777,16 +1777,16 @@ public class UnifiedNoteAppFrame extends JFrame {
 
     // ===== 粘贴处理 =====
     private void installPasteHandlers(JRootPane root){
-        // Ctrl+V：拦截并弹出选择
+        // Ctrl+V：拦截并弹出选择（在 bodyArea 上绑定以覆盖默认粘贴）
         KeyStroke ksPaste = KeyStroke.getKeyStroke('V', java.awt.event.InputEvent.CTRL_DOWN_MASK);
-        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksPaste, "pasteWithChoice");
-        root.getActionMap().put("pasteWithChoice", new AbstractAction(){
+        bodyArea.getInputMap(JComponent.WHEN_FOCUSED).put(ksPaste, "pasteWithChoice");
+        bodyArea.getActionMap().put("pasteWithChoice", new AbstractAction(){
             @Override public void actionPerformed(ActionEvent e){ doPasteWithChoice(false); }
         });
-        // Ctrl+Shift+V：直接纯文本
+        // Ctrl+Shift+V：直接纯文本（同样绑定在 bodyArea）
         KeyStroke ksPastePlain = KeyStroke.getKeyStroke('V', java.awt.event.InputEvent.CTRL_DOWN_MASK | java.awt.event.InputEvent.SHIFT_DOWN_MASK);
-        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksPastePlain, "pastePlain");
-        root.getActionMap().put("pastePlain", new AbstractAction(){
+        bodyArea.getInputMap(JComponent.WHEN_FOCUSED).put(ksPastePlain, "pastePlain");
+        bodyArea.getActionMap().put("pastePlain", new AbstractAction(){
             @Override public void actionPerformed(ActionEvent e){ doPasteWithChoice(true); }
         });
         // 同时设置 TransferHandler 作为兜底（支持鼠标粘贴）
@@ -1797,8 +1797,9 @@ public class UnifiedNoteAppFrame extends JFrame {
                             ? (String) t.getTransferData(java.awt.datatransfer.DataFlavor.stringFlavor) : null;
                     String html = extractClipboardHtml(t);
                     if (html != null){
-                        // 鼠标粘贴默认走弹窗逻辑
-                        return doPasteFromHtml(html, false);
+                        // 鼠标粘贴：与键盘一致，弹出选择
+                        doPasteWithChoice(false);
+                        return true;
                     } else if (plain != null){
                         bodyArea.replaceSelection(plain);
                         return true;
@@ -1828,14 +1829,20 @@ public class UnifiedNoteAppFrame extends JFrame {
             }
 
             // 弹窗选择
-            Object[] options = {"保留样式(转为Markdown)", "仅粘贴纯文本", "取消"};
+            Object[] options = {"保留样式(转为Markdown)", "仅粘贴纯文本", "保留原始HTML(完整样式)", "取消"};
             int opt = JOptionPane.showOptionDialog(this, "检测到富文本，如何粘贴？", "粘贴选项",
-                    JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
-            if (opt == JOptionPane.CANCEL_OPTION || opt == JOptionPane.CLOSED_OPTION) return;
-            if (opt == JOptionPane.NO_OPTION){
+                    JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
+            if (opt == 3 || opt == JOptionPane.CLOSED_OPTION) return; // 取消
+            if (opt == 1){ // 纯文本
                 if (plain != null) bodyArea.replaceSelection(plain); else bodyArea.paste();
                 return;
             }
+            if (opt == 2){ // 原始HTML（保留完整样式）
+                // 将 HTML 包裹为 <span style> 等内联内容不一定合理，这里直接降级为 Markdown 中的行内 HTML
+                bodyArea.replaceSelection(html);
+                return;
+            }
+            // 默认：HTML->Markdown
             doPasteFromHtml(html, true);
         }catch(Exception ex){ bodyArea.paste(); }
     }
