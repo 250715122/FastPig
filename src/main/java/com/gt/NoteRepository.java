@@ -172,6 +172,34 @@ public class NoteRepository {
         }
     }
 
+    /**
+     * 获取所有未删除笔记的命令和描述（用于生成 all 命令）
+     * 只查询必要字段，避免加载大量正文内容
+     */
+    public List<NoteDto> findAllCommandsAndDescriptions() {
+        // 只查询 key 和 desc，不查询 body_md 等大字段
+        String sql = "SELECT id, key, desc, title FROM snippets " +
+                     "WHERE deleted=0 AND key IS NOT NULL AND key != 'all' " +
+                     "ORDER BY key ASC";  // 按命令名排序，方便查看
+        try (Connection conn = getConnection(); 
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ResultSet rs = ps.executeQuery();
+            List<NoteDto> list = new ArrayList<>();
+            while (rs.next()) {
+                NoteDto n = new NoteDto();
+                n.id = rs.getString("id");
+                n.key = rs.getString("key");
+                n.desc = rs.getString("desc");
+                n.title = rs.getString("title");
+                // 其他字段不需要，保持为 null
+                list.add(n);
+            }
+            return list;
+        } catch (SQLException e) {
+            throw new RuntimeException("查询命令列表失败: " + e.getMessage(), e);
+        }
+    }
+
     private NoteDto mapper(ResultSet rs) throws SQLException {
         NoteDto n = new NoteDto();
         n.id = rs.getString("id");

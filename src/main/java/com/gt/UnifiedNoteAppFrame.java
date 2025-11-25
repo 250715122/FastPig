@@ -512,6 +512,17 @@ public class UnifiedNoteAppFrame extends JFrame {
             @Override public void actionPerformed(ActionEvent e) { wrapCodeBlock(); }
         });
         
+        // 程序内快捷键：Alt+X / 右Alt(AltGr)+X / Ctrl+Alt+X -> 清空编辑区
+        KeyStroke ksAltX = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_X, java.awt.event.InputEvent.ALT_DOWN_MASK);
+        KeyStroke ksAltGrX = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_X, java.awt.event.InputEvent.ALT_GRAPH_DOWN_MASK);
+        KeyStroke ksCtrlAltX = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_X, java.awt.event.InputEvent.ALT_DOWN_MASK | java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltX, "clearEditor");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltGrX, "clearEditor");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlAltX, "clearEditor");
+        root.getActionMap().put("clearEditor", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { clearEditor(); }
+        });
+        
         // Ctrl+` 插入代码块
         KeyStroke ksCtrlBacktick = KeyStroke.getKeyStroke('`', java.awt.event.InputEvent.CTRL_DOWN_MASK);
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlBacktick, "insertCodeBlock");
@@ -653,6 +664,9 @@ public class UnifiedNoteAppFrame extends JFrame {
         root.getActionMap().put("toggleSelectionToolbar", new AbstractAction(){
             @Override public void actionPerformed(ActionEvent e){ toggleSelectionToolbar(); }
         });
+        
+        // 初始化 all 命令（生成所有命令的清单）
+        initializeAllCommand();
     }
 
     private boolean previewVisible = false;
@@ -1734,12 +1748,16 @@ public class UnifiedNoteAppFrame extends JFrame {
         }
     }
 
+    /**
+     * 清空编辑区内容
+     */
     private void clearEditor() {
         current = null;
         bodyArea.setText("");
         bodyArea.requestFocus();
         updateFirstLineHighlight();
         updateEditorStatus();
+        statusLeft.setText("已清空");
     }
 
     private void saveNew(boolean manual) {
@@ -1962,6 +1980,76 @@ public class UnifiedNoteAppFrame extends JFrame {
             String time = lastSavedAt == 0 ? "" : new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date(lastSavedAt));
             statusRight.setText("" + line + ":" + col + "  |  " + len + "字  " + (time.isEmpty()? "": (" |  更新时间 " + time)));
         }catch(Exception ignored){}
+    }
+
+    /**
+     * 生成 all 命令的内容
+     * 格式：每行显示 "命令 - 描述"
+     */
+    private String generateAllCommandsContent() {
+        List<NoteDto> allNotes = repository.findAllCommandsAndDescriptions();
+        StringBuilder sb = new StringBuilder();
+        sb.append("# 所有命令列表\n\n");
+        sb.append("共 **").append(allNotes.size()).append("** 条命令\n\n");
+        sb.append("---\n\n");
+        
+        for (NoteDto note : allNotes) {
+            if (note.key != null && !note.key.isEmpty()) {
+                String desc = note.desc != null ? note.desc : note.title;
+                if (desc == null || desc.isEmpty()) desc = "(无描述)";
+                sb.append("- **").append(note.key).append("** — ").append(desc).append("\n");
+            }
+        }
+        
+        sb.append("\n---\n\n");
+        sb.append("*最后更新时间：").append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date())).append("*\n");
+        
+        return sb.toString();
+    }
+
+    /**
+     * 初始化或更新 all 命令
+     * 在程序启动时调用，生成所有命令的清单
+     */
+    public void initializeAllCommand() {
+        try {
+            // 生成 all 命令的内容
+            String content = generateAllCommandsContent();
+            
+            // 查找是否已存在 all 命令
+            NoteDto existingAll = repository.findByKey("all");
+            
+            if (existingAll != null) {
+                // 更新现有的 all 命令
+                existingAll.desc = "所有命令列表";
+                existingAll.title = "所有命令列表";
+                existingAll.bodyMd = content;
+                existingAll.updatedAt = System.currentTimeMillis();
+                existingAll.version++;
+                repository.save(existingAll);
+                System.out.println("[all命令] 已更新");
+            } else {
+                // 创建新的 all 命令
+                NoteDto allCommand = new NoteDto();
+                allCommand.id = UUID.randomUUID().toString();
+                allCommand.key = "all";
+                allCommand.desc = "所有命令列表";
+                allCommand.title = "所有命令列表";
+                allCommand.tags = new ArrayList<>();
+                allCommand.tags.add("system");
+                allCommand.bodyMd = content;
+                allCommand.frontMatter = null;
+                long now = System.currentTimeMillis();
+                allCommand.createdAt = now;
+                allCommand.updatedAt = now;
+                allCommand.version = 1;
+                repository.save(allCommand);
+                System.out.println("[all命令] 已创建");
+            }
+        } catch (Exception e) {
+            System.err.println("[all命令] 初始化失败: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     // 解析首行：返回 [rawFirstLine, key, desc]
