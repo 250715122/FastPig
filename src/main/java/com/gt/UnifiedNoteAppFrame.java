@@ -38,6 +38,150 @@ import org.scilab.forge.jlatexmath.TeXFormula;
 import org.scilab.forge.jlatexmath.TeXIcon;
 
 public class UnifiedNoteAppFrame extends JFrame {
+    
+    /**
+     * 行号显示组件
+     * 显示在编辑区左侧，不属于编辑内容，复制时不会被复制
+     */
+    private class LineNumberComponent extends JComponent {
+        private static final int PADDING = 8; // 行号与边界的间距
+        
+        public LineNumberComponent() {
+            setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
+            setBackground(new Color(240, 240, 240));
+            setForeground(new Color(128, 128, 128));
+            setOpaque(true);
+            
+            // 监听文档变化，实时更新行号显示
+            bodyArea.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+                public void insertUpdate(javax.swing.event.DocumentEvent e) { repaint(); }
+                public void removeUpdate(javax.swing.event.DocumentEvent e) { repaint(); }
+                public void changedUpdate(javax.swing.event.DocumentEvent e) { repaint(); }
+            });
+            
+            // 监听光标变化，确保行号区域及时更新
+            bodyArea.addCaretListener(e -> repaint());
+        }
+        
+        @Override
+        public Dimension getPreferredSize() {
+            // 计算行号区域的宽度
+            int lines = getLineCount();
+            int digits = Math.max(String.valueOf(lines).length(), 3); // 至少3位宽度
+            FontMetrics fm = getFontMetrics(getFont());
+            int width = fm.stringWidth("0") * digits + PADDING * 2;
+            return new Dimension(width, bodyArea.getHeight());
+        }
+        
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2d = (Graphics2D) g;
+            g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            
+            // 绘制背景
+            g2d.setColor(getBackground());
+            g2d.fillRect(0, 0, getWidth(), getHeight());
+            
+            // 绘制行号
+            g2d.setColor(getForeground());
+            g2d.setFont(getFont());
+            FontMetrics fm = g2d.getFontMetrics();
+            
+            try {
+                // 获取可见区域的起始和结束行
+                Rectangle visibleRect = bodyArea.getVisibleRect();
+                int startOffset = bodyArea.viewToModel2D(new Point(0, visibleRect.y));
+                int endOffset = bodyArea.viewToModel2D(new Point(0, visibleRect.y + visibleRect.height));
+                
+                String text = bodyArea.getText();
+                int startLine = getLineNumberAtOffset(text, startOffset);
+                int endLine = getLineNumberAtOffset(text, endOffset);
+                
+                // 绘制每一行的行号
+                for (int line = startLine; line <= endLine; line++) {
+                    int offset = getOffsetOfLine(text, line);
+                    if (offset >= 0) {
+                        Rectangle r = bodyArea.modelToView2D(offset).getBounds();
+                        String lineNum = String.valueOf(line);
+                        int x = getWidth() - fm.stringWidth(lineNum) - PADDING;
+                        int y = r.y + fm.getAscent();
+                        g2d.drawString(lineNum, x, y);
+                    }
+                }
+                
+            } catch (Exception e) {
+                // 如果出现异常，不影响编辑器的正常使用
+            }
+        }
+        
+        /**
+         * 获取文档总行数
+         */
+        private int getLineCount() {
+            String text = bodyArea.getText();
+            if (text == null || text.isEmpty()) return 1;
+            int lines = 1;
+            for (int i = 0; i < text.length(); i++) {
+                if (text.charAt(i) == '\n') lines++;
+            }
+            return lines;
+        }
+        
+        /**
+         * 获取指定偏移位置所在的行号（从1开始）
+         */
+        private int getLineNumberAtOffset(String text, int offset) {
+            if (text == null || text.isEmpty() || offset < 0) return 1;
+            int line = 1;
+            for (int i = 0; i < Math.min(offset, text.length()); i++) {
+                if (text.charAt(i) == '\n') line++;
+            }
+            return line;
+        }
+        
+        /**
+         * 获取指定行号的起始偏移位置
+         */
+        private int getOffsetOfLine(String text, int lineNumber) {
+            if (lineNumber <= 0 || text == null) return 0;
+            if (lineNumber == 1) return 0;
+            
+            int currentLine = 1;
+            for (int i = 0; i < text.length(); i++) {
+                if (text.charAt(i) == '\n') {
+                    currentLine++;
+                    if (currentLine == lineNumber) {
+                        return i + 1;
+                    }
+                }
+            }
+            return -1; // 行号超出范围
+        }
+    }
+    
+    /**
+     * 目录项数据结构
+     */
+    private static class TocItem {
+        String text;        // 标题文本
+        int level;          // 标题级别（1-6）
+        int lineNumber;     // 在编辑器中的行号
+        String anchorId;    // HTML预览中的锚点ID
+        
+        TocItem(String text, int level, int lineNumber, String anchorId) {
+            this.text = text;
+            this.level = level;
+            this.lineNumber = lineNumber;
+            this.anchorId = anchorId;
+        }
+        
+        @Override
+        public String toString() {
+            return text;
+        }
+    }
+
     private final NoteRepository repository;
     private TrayIcon trayIcon; // 系统托盘图标
 
@@ -202,6 +346,11 @@ public class UnifiedNoteAppFrame extends JFrame {
         });
         bodyArea.setLineWrap(true);
         bodyScrollPane = new JScrollPane(bodyArea);
+        
+        // 添加行号显示组件到 JScrollPane 的左侧行头
+        LineNumberComponent lineNumberComponent = new LineNumberComponent();
+        bodyScrollPane.setRowHeaderView(lineNumberComponent);
+        
         // 首行高亮：随内容变化动态更新
         bodyArea.getDocument().addDocumentListener(new javax.swing.event.DocumentListener(){
             public void insertUpdate(javax.swing.event.DocumentEvent e){ updateFirstLineHighlight(); }
@@ -236,8 +385,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         root.getActionMap().put("saveUnified", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) { saveUnified(true); }
         });
-        // 自动保存：3秒去抖
-        javax.swing.Timer autosaveTimer = new javax.swing.Timer(3000, e -> {
+        // 自动保存：10秒去抖
+        javax.swing.Timer autosaveTimer = new javax.swing.Timer(10000, e -> {
             if (!isFirstLineStructured()) {
                 // 首行未形成"key 空格 desc"，不执行自动保存
                 return;
@@ -250,6 +399,32 @@ public class UnifiedNoteAppFrame extends JFrame {
             public void removeUpdate(javax.swing.event.DocumentEvent e){ autosaveTimer.restart(); updateEditorStatus(); }
             public void changedUpdate(javax.swing.event.DocumentEvent e){ autosaveTimer.restart(); updateEditorStatus(); }
         });
+        
+        // 为普通编辑模式的目录更新添加去抖定时器
+        javax.swing.Timer tocUpdateTimer = new javax.swing.Timer(300, e -> {
+            if (!previewVisible && tocVisibleInEditMode && tocModel != null) {
+                updateTocPanel();
+            }
+        });
+        tocUpdateTimer.setRepeats(false);
+        bodyArea.getDocument().addDocumentListener(new javax.swing.event.DocumentListener(){
+            public void insertUpdate(javax.swing.event.DocumentEvent e){ 
+                if (!previewVisible && tocVisibleInEditMode) {
+                    tocUpdateTimer.restart();
+                }
+            }
+            public void removeUpdate(javax.swing.event.DocumentEvent e){ 
+                if (!previewVisible && tocVisibleInEditMode) {
+                    tocUpdateTimer.restart();
+                }
+            }
+            public void changedUpdate(javax.swing.event.DocumentEvent e){ 
+                if (!previewVisible && tocVisibleInEditMode) {
+                    tocUpdateTimer.restart();
+                }
+            }
+        });
+        
         // 程序内快捷键：Alt+P / 右Alt(AltGr)+P / Ctrl+Alt+P -> 预览/收起预览
         KeyStroke ksAltP = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_P, java.awt.event.InputEvent.ALT_DOWN_MASK);
         KeyStroke ksAltGrP = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_P, java.awt.event.InputEvent.ALT_GRAPH_DOWN_MASK);
@@ -262,6 +437,34 @@ public class UnifiedNoteAppFrame extends JFrame {
         root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksCtrlAltP, "togglePreview");
         root.getActionMap().put("togglePreview", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) { toggleInAppPreview(); }
+        });
+        
+        // 程序内快捷键：Alt+F / 右Alt(AltGr)+F / Ctrl+Alt+F -> 全屏预览/退出全屏
+        KeyStroke ksAltF = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_F, java.awt.event.InputEvent.ALT_DOWN_MASK);
+        KeyStroke ksAltGrF = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_F, java.awt.event.InputEvent.ALT_GRAPH_DOWN_MASK);
+        KeyStroke ksCtrlAltF = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_F, java.awt.event.InputEvent.ALT_DOWN_MASK | java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltF, "toggleFullscreenPreview");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltGrF, "toggleFullscreenPreview");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlAltF, "toggleFullscreenPreview");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksAltF, "toggleFullscreenPreview");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksAltGrF, "toggleFullscreenPreview");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksCtrlAltF, "toggleFullscreenPreview");
+        root.getActionMap().put("toggleFullscreenPreview", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { toggleFullscreenPreview(); }
+        });
+        
+        // 程序内快捷键：Alt+T / 右Alt(AltGr)+T / Ctrl+Alt+T -> 切换目录面板
+        KeyStroke ksAltT = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_T, java.awt.event.InputEvent.ALT_DOWN_MASK);
+        KeyStroke ksAltGrT = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_T, java.awt.event.InputEvent.ALT_GRAPH_DOWN_MASK);
+        KeyStroke ksCtrlAltT = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_T, java.awt.event.InputEvent.ALT_DOWN_MASK | java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltT, "toggleToc");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltGrT, "toggleToc");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlAltT, "toggleToc");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksAltT, "toggleToc");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksAltGrT, "toggleToc");
+        root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksCtrlAltT, "toggleToc");
+        root.getActionMap().put("toggleToc", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { toggleTocPanel(); }
         });
 
         // 程序内快捷键：Alt+D / 右Alt(AltGr)+D / Ctrl+Alt+D -> 删除(软)
@@ -297,6 +500,18 @@ public class UnifiedNoteAppFrame extends JFrame {
         root.getActionMap().put("undoSoftDelete", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) { undoSoftDelete(); }
         });
+        
+        // 程序内快捷键：Alt+C / 右Alt(AltGr)+C / Ctrl+Alt+C -> 将选中文本包裹为代码块
+        KeyStroke ksAltC = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_C, java.awt.event.InputEvent.ALT_DOWN_MASK);
+        KeyStroke ksAltGrC = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_C, java.awt.event.InputEvent.ALT_GRAPH_DOWN_MASK);
+        KeyStroke ksCtrlAltC = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_C, java.awt.event.InputEvent.ALT_DOWN_MASK | java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltC, "wrapCodeBlock");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltGrC, "wrapCodeBlock");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlAltC, "wrapCodeBlock");
+        root.getActionMap().put("wrapCodeBlock", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { wrapCodeBlock(); }
+        });
+        
         // Ctrl+` 插入代码块
         KeyStroke ksCtrlBacktick = KeyStroke.getKeyStroke('`', java.awt.event.InputEvent.CTRL_DOWN_MASK);
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlBacktick, "insertCodeBlock");
@@ -393,6 +608,15 @@ public class UnifiedNoteAppFrame extends JFrame {
                     SwingUtilities.invokeLater(() -> toggleInAppPreview());
                     return true; // 消费此事件
                 }
+                // 检查是否为 Alt+F 组合（全屏预览）
+                if (e.getID() == java.awt.event.KeyEvent.KEY_PRESSED && 
+                    e.getKeyCode() == java.awt.event.KeyEvent.VK_F &&
+                    (e.isAltDown() || e.isAltGraphDown())) {
+                    
+                    System.out.println("KeyEventDispatcher 捕获到 Alt+F，触发全屏预览切换");
+                    SwingUtilities.invokeLater(() -> toggleFullscreenPreview());
+                    return true; // 消费此事件
+                }
                 // 检查是否为 Alt+D 组合（按键按下事件）
                 if (e.getID() == java.awt.event.KeyEvent.KEY_PRESSED &&
                     e.getKeyCode() == java.awt.event.KeyEvent.VK_D &&
@@ -432,10 +656,21 @@ public class UnifiedNoteAppFrame extends JFrame {
     }
 
     private boolean previewVisible = false;
+    private boolean previewFullscreen = false; // 预览是否全屏显示
     private JSplitPane previewSplit;
     private JEditorPane htmlPane;
+    private JScrollPane htmlScrollPane; // 右侧预览区的滚动面板，用于滚动同步
     private javax.swing.Timer previewTimer;
     private JScrollPane bodyScrollPane;
+    
+    // 目录面板相关
+    private boolean tocVisible = false; // 预览模式下目录面板默认隐藏
+    private boolean tocVisibleInEditMode = false; // 普通编辑模式下目录面板默认隐藏
+    private JSplitPane previewWithTocSplit; // 预览区与目录的分割面板
+    private JSplitPane editWithTocSplit; // 编辑模式下编辑区与目录的分割面板
+    private JPanel tocPanel; // 目录面板容器
+    private JList<TocItem> tocList; // 目录列表组件
+    private DefaultListModel<TocItem> tocModel; // 目录数据模型
     private JPanel statusBar;
     private JLabel statusLeft;
     private JLabel statusRight;
@@ -463,6 +698,389 @@ public class UnifiedNoteAppFrame extends JFrame {
         } catch (Exception ignored) {}
     }
 
+    /**
+     * 切换全屏预览模式
+     * 如果预览未启动，先启动预览然后切换到全屏
+     * 如果已是分屏预览，切换到全屏
+     * 如果已是全屏，切换回分屏
+     */
+    private void toggleFullscreenPreview() {
+        // 如果预览还未启动，先启动预览
+        if (!previewVisible) {
+            toggleInAppPreview();
+        }
+        
+        // 切换全屏/分屏模式
+        if (previewFullscreen) {
+            // 从全屏切换回分屏
+            exitFullscreenPreview();
+        } else {
+            // 从分屏切换到全屏
+            enterFullscreenPreview();
+        }
+    }
+    
+    /**
+     * 进入全屏预览模式
+     */
+    private void enterFullscreenPreview() {
+        if (!previewVisible) return;
+        
+        try {
+            // 移除当前的分屏布局
+            getContentPane().remove(centerComponent);
+            
+            // 全屏显示：目录区 | 预览区（如果目录可见）
+            if (tocVisible && tocPanel != null) {
+                // 重新创建目录和预览的分割面板
+                previewWithTocSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
+                        tocPanel, htmlScrollPane);
+                previewWithTocSplit.setResizeWeight(0);
+                centerComponent = previewWithTocSplit;
+                SwingUtilities.invokeLater(() -> previewWithTocSplit.setDividerLocation(200));
+            } else {
+                // 只显示预览面板（全屏）
+                centerComponent = htmlScrollPane;
+            }
+            
+            getContentPane().add(centerComponent, BorderLayout.CENTER);
+            
+            previewFullscreen = true;
+            revalidate();
+            repaint();
+            
+            // 显示提示浮标
+            showPreviewBadge("全屏预览（Alt+F退出，Alt+T切换目录）");
+            
+            System.out.println("[预览] 已进入全屏预览模式");
+        } catch (Exception e) {
+            System.err.println("[预览] 进入全屏预览失败: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * 退出全屏预览，返回分屏模式
+     */
+    private void exitFullscreenPreview() {
+        if (!previewVisible || !previewFullscreen) return;
+        
+        try {
+            // 移除全屏预览
+            getContentPane().remove(centerComponent);
+            
+            // 恢复三栏分屏布局：编辑区 | 目录区 | 预览区
+            JScrollPane leftScrollPane = new JScrollPane(bodyArea);
+            LineNumberComponent lineNumber = new LineNumberComponent();
+            leftScrollPane.setRowHeaderView(lineNumber);
+            
+            // 重新创建目录和预览的分割面板（内层）
+            previewWithTocSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
+                    tocVisible ? tocPanel : null, htmlScrollPane);
+            previewWithTocSplit.setResizeWeight(0);
+            if (!tocVisible) {
+                previewWithTocSplit.setLeftComponent(null);
+            }
+            
+            // 创建编辑区和(目录+预览)的分割面板（外层）
+            previewSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
+                    leftScrollPane, previewWithTocSplit);
+            previewSplit.setResizeWeight(0.5);
+            
+            centerComponent = previewSplit;
+            getContentPane().add(centerComponent, BorderLayout.CENTER);
+            
+            previewFullscreen = false;
+            revalidate();
+            repaint();
+            SwingUtilities.invokeLater(() -> {
+                previewSplit.setDividerLocation(0.5);
+                if (tocVisible) {
+                    previewWithTocSplit.setDividerLocation(200);
+                }
+            });
+            
+            // 重新添加滚动同步
+            addScrollSync(leftScrollPane);
+            
+            // 显示提示浮标
+            showPreviewBadge("分屏预览（Alt+P退出，Alt+T切换目录）");
+            
+            System.out.println("[预览] 已退出全屏预览模式");
+        } catch (Exception e) {
+            System.err.println("[预览] 退出全屏预览失败: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * 切换目录面板显示/隐藏
+     * 支持预览模式和普通编辑模式
+     */
+    private void toggleTocPanel() {
+        if (previewVisible) {
+            // 预览模式下切换目录
+            tocVisible = !tocVisible;
+            
+            try {
+                if (previewFullscreen) {
+                    // 全屏模式下切换目录
+                    getContentPane().remove(centerComponent);
+                    
+                    if (tocVisible && tocPanel != null) {
+                        // 显示目录：目录区 | 预览区
+                        previewWithTocSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
+                                tocPanel, htmlScrollPane);
+                        previewWithTocSplit.setResizeWeight(0);
+                        centerComponent = previewWithTocSplit;
+                        SwingUtilities.invokeLater(() -> previewWithTocSplit.setDividerLocation(200));
+                    } else {
+                        // 隐藏目录：只显示预览区
+                        centerComponent = htmlScrollPane;
+                    }
+                    
+                    getContentPane().add(centerComponent, BorderLayout.CENTER);
+                } else {
+                    // 分屏模式下切换目录
+                    if (tocVisible && tocPanel != null) {
+                        // 显示目录
+                        previewWithTocSplit.setLeftComponent(tocPanel);
+                        SwingUtilities.invokeLater(() -> previewWithTocSplit.setDividerLocation(200));
+                    } else {
+                        // 隐藏目录
+                        previewWithTocSplit.setLeftComponent(null);
+                    }
+                }
+                
+                revalidate();
+                repaint();
+                
+                String msg = tocVisible ? "目录已显示" : "目录已隐藏";
+                showPreviewBadge(msg);
+                System.out.println("[TOC] " + msg);
+            } catch (Exception e) {
+                System.err.println("[TOC] 切换目录失败: " + e.getMessage());
+            }
+        } else {
+            // 普通编辑模式下切换目录
+            tocVisibleInEditMode = !tocVisibleInEditMode;
+            
+            try {
+                getContentPane().remove(centerComponent);
+                
+                if (tocVisibleInEditMode) {
+                    // 显示目录：编辑区 | 目录区
+                    // 创建或更新目录面板
+                    if (tocPanel == null) {
+                        tocPanel = createTocPanel();
+                    }
+                    updateTocPanel();
+                    
+                    // 创建编辑区和目录区的分割面板
+                    editWithTocSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
+                            bodyScrollPane, tocPanel);
+                    editWithTocSplit.setResizeWeight(1.0); // 编辑区占据大部分空间
+                    
+                    // 创建包含分割面板和状态栏的面板
+                    JPanel containerPanel = new JPanel(new BorderLayout(8, 8));
+                    containerPanel.add(editWithTocSplit, BorderLayout.CENTER);
+                    containerPanel.add(statusBar, BorderLayout.SOUTH);
+                    
+                    centerComponent = containerPanel;
+                    getContentPane().add(centerComponent, BorderLayout.CENTER);
+                    
+                    SwingUtilities.invokeLater(() -> {
+                        int width = getWidth();
+                        editWithTocSplit.setDividerLocation(width - 200 - 10);
+                    });
+                } else {
+                    // 隐藏目录：只显示编辑区
+                    JPanel editorOnlyPanel = new JPanel(new BorderLayout(8, 8));
+                    editorOnlyPanel.add(bodyScrollPane, BorderLayout.CENTER);
+                    editorOnlyPanel.add(statusBar, BorderLayout.SOUTH);
+                    
+                    centerComponent = editorOnlyPanel;
+                    getContentPane().add(centerComponent, BorderLayout.CENTER);
+                }
+                
+                revalidate();
+                repaint();
+                
+                String msg = tocVisibleInEditMode ? "目录已显示" : "目录已隐藏";
+                showPreviewBadge(msg);
+                System.out.println("[TOC] 编辑模式 - " + msg);
+            } catch (Exception e) {
+                System.err.println("[TOC] 编辑模式切换目录失败: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
+    }
+    
+    /**
+     * 添加滚动同步监听器
+     */
+    private void addScrollSync(JScrollPane leftScrollPane) {
+        leftScrollPane.getVerticalScrollBar().addAdjustmentListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                try {
+                    JScrollBar leftBar = leftScrollPane.getVerticalScrollBar();
+                    JScrollBar rightBar = htmlScrollPane.getVerticalScrollBar();
+                    
+                    int leftMax = leftBar.getMaximum() - leftBar.getVisibleAmount();
+                    if (leftMax > 0) {
+                        double scrollPercent = (double) leftBar.getValue() / leftMax;
+                        int rightMax = rightBar.getMaximum() - rightBar.getVisibleAmount();
+                        int rightValue = (int) (scrollPercent * rightMax);
+                        rightBar.setValue(rightValue);
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        });
+    }
+    
+    /**
+     * 显示预览提示浮标
+     */
+    private void showPreviewBadge(String text) {
+        try {
+            JLayeredPane layered = getLayeredPane();
+            JLabel badge = new JLabel(text);
+            badge.setOpaque(true);
+            badge.setBackground(new Color(0,0,0,150));
+            badge.setForeground(Color.WHITE);
+            badge.setBorder(BorderFactory.createEmptyBorder(4,8,4,8));
+            Dimension sz = badge.getPreferredSize();
+            int x = getWidth() - sz.width - 24;
+            int y = 12;
+            badge.setBounds(x, y, sz.width, sz.height);
+            layered.add(badge, JLayeredPane.POPUP_LAYER);
+            javax.swing.Timer t = new javax.swing.Timer(1500, e -> {
+                layered.remove(badge);
+                layered.revalidate();
+                layered.repaint();
+            });
+            t.setRepeats(false);
+            t.start();
+        } catch (Exception ignored) {}
+    }
+    
+    /**
+     * 创建目录面板UI
+     */
+    private JPanel createTocPanel() {
+        tocModel = new DefaultListModel<>();
+        tocList = new JList<>(tocModel);
+        tocList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        tocList.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+        
+        // 自定义渲染器实现标题层级缩进
+        tocList.setCellRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, 
+                    int index, boolean isSelected, boolean cellHasFocus) {
+                JLabel label = (JLabel) super.getListCellRendererComponent(
+                        list, value, index, isSelected, cellHasFocus);
+                
+                if (value instanceof TocItem) {
+                    TocItem item = (TocItem) value;
+                    // 根据层级缩进：每级缩进 15 像素
+                    int indent = (item.level - 1) * 15;
+                    label.setBorder(BorderFactory.createEmptyBorder(3, indent + 5, 3, 5));
+                    
+                    // 根据层级设置不同的字体大小
+                    int fontSize = 12;
+                    if (item.level == 1) fontSize = 14;
+                    else if (item.level == 2) fontSize = 13;
+                    label.setFont(new Font(Font.SANS_SERIF, 
+                            item.level <= 2 ? Font.BOLD : Font.PLAIN, fontSize));
+                }
+                
+                return label;
+            }
+        });
+        
+        // 添加点击监听器
+        tocList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                TocItem selected = tocList.getSelectedValue();
+                if (selected != null) {
+                    jumpToHeading(selected);
+                }
+            }
+        });
+        
+        JScrollPane scrollPane = new JScrollPane(tocList);
+        scrollPane.setBorder(BorderFactory.createTitledBorder("目录"));
+        
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.add(scrollPane, BorderLayout.CENTER);
+        panel.setPreferredSize(new Dimension(200, 0));
+        panel.setMinimumSize(new Dimension(200, 0));
+        
+        return panel;
+    }
+    
+    /**
+     * 更新目录列表
+     */
+    private void updateTocPanel() {
+        if (tocModel == null) return;
+        
+        String md = bodyArea.getText();
+        List<TocItem> toc = extractTocFromMarkdown(md);
+        
+        tocModel.clear();
+        for (TocItem item : toc) {
+            tocModel.addElement(item);
+        }
+    }
+    
+    /**
+     * 跳转到指定标题
+     * 同时滚动编辑区和预览区到对应位置
+     */
+    private void jumpToHeading(TocItem item) {
+        if (item == null) return;
+        
+        try {
+            // 跳转编辑区：定位到指定行号
+            String text = bodyArea.getText();
+            String[] lines = text.split("\n", -1);
+            
+            if (item.lineNumber > 0 && item.lineNumber <= lines.length) {
+                // 计算目标行的偏移位置
+                int offset = 0;
+                for (int i = 0; i < item.lineNumber - 1 && i < lines.length; i++) {
+                    offset += lines[i].length() + 1; // +1 for newline
+                }
+                
+                // 设置光标位置并滚动到可见区域
+                bodyArea.setCaretPosition(offset);
+                bodyArea.requestFocusInWindow();
+                
+                // 尝试将目标行滚动到视口中央
+                try {
+                    Rectangle rect = bodyArea.modelToView(offset);
+                    if (rect != null) {
+                        Rectangle visibleRect = bodyArea.getVisibleRect();
+                        rect.y = Math.max(0, rect.y - visibleRect.height / 2);
+                        bodyArea.scrollRectToVisible(rect);
+                    }
+                } catch (Exception e) {
+                    // 忽略滚动错误
+                }
+            }
+            
+            // 跳转预览区：使用锚点ID
+            if (htmlPane != null && item.anchorId != null && !item.anchorId.isEmpty()) {
+                SwingUtilities.invokeLater(() -> {
+                    htmlPane.scrollToReference(item.anchorId);
+                });
+            }
+        } catch (Exception e) {
+            System.err.println("[TOC] 跳转失败: " + e.getMessage());
+        }
+    }
+    
     private void toggleInAppPreview() {
         if (!previewVisible) {
             // 创建右侧 HTML 预览（离线，无JS），公式以内联图片呈现
@@ -470,18 +1088,50 @@ public class UnifiedNoteAppFrame extends JFrame {
             htmlPane.setEditable(false);
             htmlPane.setContentType("text/html;charset=UTF-8");
 
+            // 为预览模式创建带行号的 JScrollPane
+            JScrollPane leftScrollPane = new JScrollPane(bodyArea);
+            LineNumberComponent previewLineNumberComponent = new LineNumberComponent();
+            leftScrollPane.setRowHeaderView(previewLineNumberComponent);
+            
+            // 创建右侧预览区的滚动面板
+            htmlScrollPane = new JScrollPane(htmlPane);
+            
+            // 创建目录面板
+            tocPanel = createTocPanel();
+            
+            // 创建目录区和预览区的分割面板（内层）
+            // 布局：目录区 | 预览区
+            previewWithTocSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
+                    tocVisible ? tocPanel : null, htmlScrollPane);
+            previewWithTocSplit.setResizeWeight(0);
+            if (!tocVisible) {
+                previewWithTocSplit.setLeftComponent(null);
+            }
+            
+            // 创建编辑区和(目录+预览)的分割面板（外层）
+            // 布局：编辑区 | (目录区 + 预览区)
             previewSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
-                    new JScrollPane(bodyArea), new JScrollPane(htmlPane));
+                    leftScrollPane, previewWithTocSplit);
             previewSplit.setResizeWeight(0.5);
+            
             getContentPane().remove(centerComponent);
             centerComponent = previewSplit;
             getContentPane().add(centerComponent, BorderLayout.CENTER);
             revalidate();
             repaint();
-            SwingUtilities.invokeLater(() -> previewSplit.setDividerLocation(0.5));
+            SwingUtilities.invokeLater(() -> {
+                previewSplit.setDividerLocation(0.5);
+                if (tocVisible) {
+                    previewWithTocSplit.setDividerLocation(200);
+                }
+            });
+            
+            // 添加滚动同步
+            addScrollSync(leftScrollPane);
 
             refreshInAppPreview();
             previewVisible = true;
+            previewFullscreen = false; // 初始为分屏模式
             // 安装实时预览（去抖200ms）
             if (previewTimer == null) {
                 previewTimer = new javax.swing.Timer(200, e -> refreshInAppPreview());
@@ -496,6 +1146,11 @@ public class UnifiedNoteAppFrame extends JFrame {
             // 关闭预览，恢复原布局
             getContentPane().remove(centerComponent);
             bodyScrollPane = new JScrollPane(bodyArea);
+            
+            // 添加行号显示组件（恢复普通模式时也需要行号）
+            LineNumberComponent normalLineNumberComponent = new LineNumberComponent();
+            bodyScrollPane.setRowHeaderView(normalLineNumberComponent);
+            
             JPanel editor2 = new JPanel(new BorderLayout(8, 8));
             editor2.add(bodyScrollPane, BorderLayout.CENTER);
             editor2.add(statusBar, BorderLayout.SOUTH);
@@ -504,6 +1159,8 @@ public class UnifiedNoteAppFrame extends JFrame {
             revalidate();
             repaint();
             previewVisible = false;
+            previewFullscreen = false; // 重置全屏状态
+            tocVisible = true; // 重置目录可见状态为默认值
         }
     }
 
@@ -522,7 +1179,9 @@ public class UnifiedNoteAppFrame extends JFrame {
         mdWithImgs = replaceAllMermaidWithImages(mdWithImgs);
         // 规范化将标题后的 (#id) 转为 {#id}
         String normalized = normalizeHeadingAnchors(mdWithImgs);
-        String html = renderMarkdown(normalized);
+        // 为没有锚点ID的标题自动添加锚点
+        String withAnchors = addHeadingAnchors(normalized);
+        String html = renderMarkdown(withAnchors);
         try {
             String snippet = mdWithImgs.length() > 200 ? mdWithImgs.substring(0, 200) + "..." : mdWithImgs;
             System.out.println("[预览] Markdown 片段: \n" + snippet);
@@ -543,6 +1202,9 @@ public class UnifiedNoteAppFrame extends JFrame {
                          "</style></head><body>" + html + "</body></html>";
         htmlPane.setText(fullHtml);
         htmlPane.setCaretPosition(0);
+        
+        // 更新目录面板
+        updateTocPanel();
         
         // 预览指示浮标
         try {
@@ -573,9 +1235,9 @@ public class UnifiedNoteAppFrame extends JFrame {
     private String replaceAllMermaidWithImages(String text) {
         if (text == null) return "";
         
-        // 匹配 ```mermaid ... ``` 代码块
+        // 匹配 ```mermaid ... ``` 代码块（更宽松的匹配）
         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
-            "```mermaid\\s*\\n([\\s\\S]*?)\\n```",
+            "```mermaid\\s*([\\s\\S]*?)```",
             java.util.regex.Pattern.MULTILINE
         );
         
@@ -593,24 +1255,171 @@ public class UnifiedNoteAppFrame extends JFrame {
     }
     
     /**
+     * 清理 Mermaid 代码中的特殊字符和格式问题
+     */
+    private String cleanMermaidCode(String mermaidCode) {
+        if (mermaidCode == null || mermaidCode.isEmpty()) return mermaidCode;
+        
+        String cleaned = mermaidCode;
+        
+        // 1. 移除零宽字符（常见的不可见字符）
+        cleaned = cleaned.replaceAll("[\u200B\u200C\u200D\uFEFF]", "");
+        
+        // 2. 移除每行开头和结尾的竖线（当它们不是合法的 Mermaid 语法时）
+        // 检测模式：行首的 | + 非空格内容，或内容 + 行尾的 |
+        cleaned = cleaned.replaceAll("(?m)^\\s*\\|([^|])", "$1");  // 行首的单个 |
+        cleaned = cleaned.replaceAll("(?m)([^|])\\|\\s*$", "$1");  // 行尾的单个 |
+        
+        // 3. 规范化行尾空白
+        cleaned = cleaned.replaceAll("(?m)[ \\t]+$", "");
+        
+        // 4. 移除多余的空行（保留最多一个空行）
+        cleaned = cleaned.replaceAll("\\n{3,}", "\n\n");
+        
+        return cleaned.trim();
+    }
+    
+    /**
+     * 预处理 Mermaid 代码以提高兼容性
+     */
+    private String preprocessMermaidCode(String mermaidCode) {
+        String processed = mermaidCode;
+        
+        // 1. 将 flowchart 转换为 graph（兼容旧版本 Mermaid，作为兜底）
+        processed = processed.replaceAll("(?m)^\\s*flowchart\\s+", "graph ");
+        
+        // 2. 移除 Font Awesome 图标前缀（如果 Kroki 不支持）
+        // fa:fa-xxx 保留后面的文本
+        processed = processed.replaceAll("fa:fa-\\w+\\s+", "");
+        
+        return processed;
+    }
+    
+    /**
      * 将 Mermaid 代码转换为图片标签
-     * 使用 mermaid.ink 在线API
+     * 使用 kroki.io 备用API（POST 方式，支持更多 Mermaid 特性），下载图片到本地后使用 file:// 协议加载
      */
     private String convertMermaidToImageTag(String mermaidCode) {
         try {
-            // 对 Mermaid 代码进行 Base64 编码
-            String encoded = java.util.Base64.getEncoder().encodeToString(mermaidCode.getBytes("UTF-8"));
+            System.out.println("[Mermaid] 原始代码长度: " + mermaidCode.length() + " 字符");
             
-            // 使用 mermaid.ink API
-            // 格式: https://mermaid.ink/img/<base64_encoded_code>
-            String imageUrl = "https://mermaid.ink/img/" + encoded;
+            // 步骤1: 清理特殊字符
+            String cleanedCode = cleanMermaidCode(mermaidCode);
+            System.out.println("[Mermaid] 清理后代码:\n" + cleanedCode);
             
-            // 返回 Markdown 图片语法
-            return "\n![Mermaid Diagram](" + imageUrl + ")\n";
+            // 步骤2: 语法预处理（兼容性转换）
+            String processedCode = preprocessMermaidCode(cleanedCode);
+            if (!processedCode.equals(cleanedCode)) {
+                System.out.println("[Mermaid] 预处理后代码:\n" + processedCode);
+            }
+            
+            // 使用 kroki.io API（POST 方式，避免 URL 长度限制）
+            String apiUrl = "https://kroki.io/mermaid/png";
+            System.out.println("[Mermaid] 使用 Kroki API (POST): " + apiUrl);
+            
+            // 下载图片到本地（使用 POST 方式）
+            File localImageFile = downloadMermaidImagePost(apiUrl, processedCode);
+            
+            if (localImageFile != null && localImageFile.exists()) {
+                String localUrl = localImageFile.toURI().toString();
+                System.out.println("[Mermaid] 本地图片路径: " + localUrl);
+                return "\n<img src='" + localUrl + "' alt='Mermaid Diagram' style='max-width:100%; display:block; margin:10px auto;'/>\n";
+            } else {
+                System.err.println("[Mermaid] 图片下载失败");
+                return "\n<div style='color:orange; border:1px solid orange; padding:10px; margin:10px;'>" +
+                       "⚠️ Mermaid 图表加载失败，请检查网络连接</div>\n";
+            }
             
         } catch (Exception e) {
-            // 如果转换失败，返回原始代码块
-            return "\n```mermaid\n" + mermaidCode + "\n```\n";
+            System.err.println("[Mermaid] 转换失败: " + e.getMessage());
+            e.printStackTrace();
+            return "\n<div style='color:red; border:1px solid red; padding:10px; margin:10px;'>" +
+                   "❌ Mermaid 图表转换失败<br/>" +
+                   "错误: " + e.getMessage() + "</div>\n";
+        }
+    }
+    
+    /**
+     * 下载 Mermaid 图片到本地临时目录（使用 POST 方式）
+     * @param apiUrl Kroki API 的端点 URL
+     * @param mermaidCode 原始 Mermaid 代码
+     * @return 本地图片文件，如果下载失败返回 null
+     */
+    private File downloadMermaidImagePost(String apiUrl, String mermaidCode) {
+        try {
+            // 创建临时目录
+            File tempDir = new File(System.getProperty("java.io.tmpdir"), "fastpig_mermaid");
+            if (!tempDir.exists()) {
+                tempDir.mkdirs();
+            }
+            
+            // 使用 Mermaid 代码的哈希作为文件名，避免重复下载
+            String fileName = Integer.toHexString(mermaidCode.hashCode()) + ".png";
+            File localFile = new File(tempDir, fileName);
+            
+            // 如果文件已存在，直接返回（缓存）
+            if (localFile.exists() && localFile.length() > 0) {
+                System.out.println("[Mermaid] 使用缓存图片: " + fileName);
+                return localFile;
+            }
+            
+            // 使用 POST 请求下载图片
+            System.out.println("[Mermaid] 正在通过 POST 请求下载图片...");
+            java.net.URL url = new java.net.URL(apiUrl);
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(15000);
+            conn.setRequestProperty("Content-Type", "text/plain; charset=UTF-8");
+            
+            // 发送 Mermaid 代码
+            java.io.OutputStream os = conn.getOutputStream();
+            os.write(mermaidCode.getBytes("UTF-8"));
+            os.flush();
+            os.close();
+            
+            int responseCode = conn.getResponseCode();
+            System.out.println("[Mermaid] HTTP 响应码: " + responseCode);
+            
+            if (responseCode == 200) {
+                // 读取图片数据
+                java.io.InputStream in = conn.getInputStream();
+                java.io.FileOutputStream out = new java.io.FileOutputStream(localFile);
+                
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, bytesRead);
+                }
+                
+                out.close();
+                in.close();
+                
+                System.out.println("[Mermaid] 图片下载成功: " + localFile.length() + " 字节");
+                return localFile;
+            } else {
+                // 读取错误信息
+                java.io.InputStream errorStream = conn.getErrorStream();
+                if (errorStream != null) {
+                    java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(errorStream, "UTF-8"));
+                    StringBuilder errorMsg = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        errorMsg.append(line).append("\n");
+                    }
+                    reader.close();
+                    System.err.println("[Mermaid] 服务器错误信息: " + errorMsg.toString());
+                }
+                System.err.println("[Mermaid] HTTP 错误: " + responseCode);
+                return null;
+            }
+            
+        } catch (Exception e) {
+            System.err.println("[Mermaid] 下载失败: " + e.getMessage());
+            e.printStackTrace();
+            return null;
         }
     }
 
@@ -624,6 +1433,40 @@ public class UnifiedNoteAppFrame extends JFrame {
         HtmlRenderer renderer = HtmlRenderer.builder(opts).build();
         Node doc = parser.parse(md == null ? "" : md);
         return renderer.render(doc);
+    }
+    
+    /**
+     * 从 Markdown 文本中提取目录结构
+     */
+    private List<TocItem> extractTocFromMarkdown(String md) {
+        List<TocItem> toc = new ArrayList<>();
+        if (md == null || md.isEmpty()) return toc;
+        
+        String[] lines = md.split("\n", -1);
+        java.util.regex.Pattern headingPattern = java.util.regex.Pattern.compile("^(#{1,6})\\s+(.+?)(?:\\s*\\{#([A-Za-z0-9_-]+)\\})?\\s*$");
+        
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            java.util.regex.Matcher matcher = headingPattern.matcher(line);
+            if (matcher.find()) {
+                String hashes = matcher.group(1);
+                String text = matcher.group(2).trim();
+                String anchorId = matcher.group(3);
+                
+                int level = hashes.length();
+                int lineNumber = i + 1; // 行号从1开始
+                
+                // 如果没有显式指定 anchorId，生成一个
+                if (anchorId == null || anchorId.isEmpty()) {
+                    // 生成简单的锚点ID：移除特殊字符，转为小写，空格转为连字符
+                    anchorId = "heading-" + lineNumber;
+                }
+                
+                toc.add(new TocItem(text, level, lineNumber, anchorId));
+            }
+        }
+        
+        return toc;
     }
 
     /**
@@ -674,7 +1517,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         return out.toString();
     }
 
-    // 将 “## 标题 (#id)” 规范化为 “## 标题 {#id}”，便于 AttributesExtension 识别
+    // 将 "## 标题 (#id)" 规范化为 "## 标题 {#id}"，便于 AttributesExtension 识别
     private String normalizeHeadingAnchors(String src){
         if (src == null || src.isEmpty()) return src;
         String[] lines = src.split("\n", -1);
@@ -690,6 +1533,44 @@ public class UnifiedNoteAppFrame extends JFrame {
                 out.append(line).append('\n');
             }
         }
+        return out.toString();
+    }
+    
+    /**
+     * 为所有标题添加锚点ID（如果尚未指定）
+     */
+    private String addHeadingAnchors(String src) {
+        if (src == null || src.isEmpty()) return src;
+        
+        String[] lines = src.split("\n", -1);
+        StringBuilder out = new StringBuilder(src.length());
+        
+        // 匹配标题行，可能已经有 {#id} 或没有
+        java.util.regex.Pattern headingPattern = java.util.regex.Pattern.compile("^(#{1,6}\\s+)(.+?)(?:\\s*\\{#([A-Za-z0-9_-]+)\\})?\\s*$");
+        
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            java.util.regex.Matcher matcher = headingPattern.matcher(line);
+            
+            if (matcher.find()) {
+                String hashes = matcher.group(1);
+                String text = matcher.group(2).trim();
+                String existingId = matcher.group(3);
+                
+                if (existingId == null || existingId.isEmpty()) {
+                    // 没有锚点ID，自动生成
+                    String anchorId = "heading-" + (i + 1);
+                    out.append(hashes).append(text).append(" {#").append(anchorId).append("}").append('\n');
+                } else {
+                    // 已有锚点ID，保持原样
+                    out.append(line).append('\n');
+                }
+            } else {
+                // 不是标题行，保持原样
+                out.append(line).append('\n');
+            }
+        }
+        
         return out.toString();
     }
 
@@ -864,8 +1745,9 @@ public class UnifiedNoteAppFrame extends JFrame {
     private void saveNew(boolean manual) {
         String[] parsed = splitFirstLineAndBody(bodyArea.getText());
         if (parsed[1].isEmpty()) { JOptionPane.showMessageDialog(this, "首行需包含快捷命令", "校验", JOptionPane.WARNING_MESSAGE); return; }
-        // 保存光标位置
-        int caretPos = bodyArea.getCaretPosition();
+        // 保存选区状态
+        int selectionStart = bodyArea.getSelectionStart();
+        int selectionEnd = bodyArea.getSelectionEnd();
         NoteDto n = new NoteDto();
         n.id = UUID.randomUUID().toString();
         n.key = parsed[1];
@@ -883,9 +1765,13 @@ public class UnifiedNoteAppFrame extends JFrame {
         // 只更新 current，不重新加载文本
         current = n;
         updateEditorStatus();
-        // 恢复光标位置
+        // 恢复选区状态
         try {
-            bodyArea.setCaretPosition(Math.min(caretPos, bodyArea.getText().length()));
+            int textLength = bodyArea.getText().length();
+            int start = Math.min(selectionStart, textLength);
+            int end = Math.min(selectionEnd, textLength);
+            bodyArea.setSelectionStart(start);
+            bodyArea.setSelectionEnd(end);
         } catch (Exception ignored) {}
     }
 
@@ -897,8 +1783,9 @@ public class UnifiedNoteAppFrame extends JFrame {
         }
         String[] parsed = splitFirstLineAndBody(bodyArea.getText());
         if (parsed[1].isEmpty()) { JOptionPane.showMessageDialog(this, "首行需包含快捷命令", "校验", JOptionPane.WARNING_MESSAGE); return; }
-        // 保存光标位置
-        int caretPos = bodyArea.getCaretPosition();
+        // 保存选区状态
+        int selectionStart = bodyArea.getSelectionStart();
+        int selectionEnd = bodyArea.getSelectionEnd();
         String newKey = parsed[1];
         // 如果快捷命令已改变，则按"保存为新"处理；否则更新当前
         if (!newKey.equals(current.key)) {
@@ -919,9 +1806,13 @@ public class UnifiedNoteAppFrame extends JFrame {
             // 只更新 current，不重新加载文本
             current = n;
             updateEditorStatus();
-            // 恢复光标位置
+            // 恢复选区状态
             try {
-                bodyArea.setCaretPosition(Math.min(caretPos, bodyArea.getText().length()));
+                int textLength = bodyArea.getText().length();
+                int start = Math.min(selectionStart, textLength);
+                int end = Math.min(selectionEnd, textLength);
+                bodyArea.setSelectionStart(start);
+                bodyArea.setSelectionEnd(end);
             } catch (Exception ignored) {}
             return;
         }
@@ -936,9 +1827,13 @@ public class UnifiedNoteAppFrame extends JFrame {
         if (manual) JOptionPane.showMessageDialog(this, "已更新", "提示", JOptionPane.INFORMATION_MESSAGE);
         // 只更新状态，不重新加载文本
         updateEditorStatus();
-        // 恢复光标位置
+        // 恢复选区状态
         try {
-            bodyArea.setCaretPosition(Math.min(caretPos, bodyArea.getText().length()));
+            int textLength = bodyArea.getText().length();
+            int start = Math.min(selectionStart, textLength);
+            int end = Math.min(selectionEnd, textLength);
+            bodyArea.setSelectionStart(start);
+            bodyArea.setSelectionEnd(end);
         } catch (Exception ignored) {}
     }
 
@@ -1670,6 +2565,36 @@ public class UnifiedNoteAppFrame extends JFrame {
             String sel = bodyArea.getSelectedText();
             bodyArea.replaceRange(left + sel + right, start, end);
             bodyArea.select(start + left.length(), start + left.length() + sel.length());
+        }catch(Exception ignored){}
+    }
+    
+    /**
+     * 将选中文本包裹为代码块
+     * 单行：使用行内代码 `code`
+     * 多行：使用代码块 ```\ncode\n```
+     */
+    private void wrapCodeBlock(){
+        try{
+            int start = bodyArea.getSelectionStart();
+            int end = bodyArea.getSelectionEnd();
+            if (start == end) return; // 没有选中内容
+            
+            String selected = bodyArea.getSelectedText();
+            
+            // 判断是单行还是多行
+            if (selected.contains("\n")) {
+                // 多行：使用代码块 ```
+                String wrapped = "```\n" + selected + "\n```";
+                bodyArea.replaceRange(wrapped, start, end);
+                // 保持选中代码内容（不包括```标记）
+                bodyArea.select(start + 4, start + 4 + selected.length());
+            } else {
+                // 单行：使用行内代码 `
+                String wrapped = "`" + selected + "`";
+                bodyArea.replaceRange(wrapped, start, end);
+                // 保持选中代码内容（不包括反引号）
+                bodyArea.select(start + 1, start + 1 + selected.length());
+            }
         }catch(Exception ignored){}
     }
 
