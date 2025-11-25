@@ -1174,7 +1174,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             repaint();
             previewVisible = false;
             previewFullscreen = false; // 重置全屏状态
-            tocVisible = true; // 重置目录可见状态为默认值
+            tocVisible = false; // 重置目录可见状态为默认值（隐藏）
         }
     }
 
