@@ -1779,7 +1779,6 @@ public class UnifiedNoteAppFrame extends JFrame {
         n.updatedAt = now;
         n.version = 1;
         repository.save(n);
-        if (manual) JOptionPane.showMessageDialog(this, "已保存为新", "提示", JOptionPane.INFORMATION_MESSAGE);
         // 只更新 current，不重新加载文本
         current = n;
         updateEditorStatus();
@@ -1820,7 +1819,6 @@ public class UnifiedNoteAppFrame extends JFrame {
             n.updatedAt = now;
             n.version = 1;
             repository.save(n);
-            if (manual) JOptionPane.showMessageDialog(this, "已保存为新（快捷命令已变更）", "提示", JOptionPane.INFORMATION_MESSAGE);
             // 只更新 current，不重新加载文本
             current = n;
             updateEditorStatus();
@@ -1842,7 +1840,6 @@ public class UnifiedNoteAppFrame extends JFrame {
         current.updatedAt = System.currentTimeMillis();
         current.version = Math.max(1, current.version + 1);
         repository.save(current);
-        if (manual) JOptionPane.showMessageDialog(this, "已更新", "提示", JOptionPane.INFORMATION_MESSAGE);
         // 只更新状态，不重新加载文本
         updateEditorStatus();
         // 恢复选区状态
