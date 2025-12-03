@@ -13,6 +13,9 @@ public class NoteDto {
     public long createdAt;
     public long updatedAt;
     public int version;
+    public boolean deleted;      // 软删除标记
+    public String folderPath;    // 笔记文件夹路径（新增）
+    public String contentHash;   // 内容哈希，用于检测变更（新增）
 }
 
 

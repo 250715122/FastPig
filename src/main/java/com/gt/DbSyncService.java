@@ -1,5 +1,8 @@
 package com.gt;
 
+import com.gt.sync.NoteFileSync;
+import com.gt.service.NoteService;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -8,17 +11,17 @@ import java.nio.file.StandardCopyOption;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
+import java.util.concurrent.*;
 
 /**
- * 数据库同步服务 - 集成本地备份和坚果云 WebDAV 同步
- *
- * 同步策略：
- * 1. 本地备份：fastpig.db → data/fastpig.db（本地副本）
- * 2. WebDAV 同步：fastpig.db → 坚果云网页端（真正的云同步）
- *
- * 配置方式：
- * - nutstore.username: 坚果云账号（邮箱）
- * - nutstore.password: 坚果云应用密码（非登录密码！）
+ * 数据同步服务
+ * 
+ * 改造后使用文件级增量同步：
+ * - 笔记存储为独立的 Markdown 文件夹
+ * - 只同步 notes/ 目录，不同步 SQLite 数据库
+ * - 支持增量上传/下载
+ * 
+ * 保留旧的数据库同步作为向后兼容（可通过配置开关）
  */
 public class DbSyncService {
 
@@ -36,120 +39,69 @@ public class DbSyncService {
     }
 
     private final Path localDb;
-    private final Path cloudDir;
-    private final Path cloudDb;
-    private final boolean localBackupEnabled;
-    private final NutstoreWebDAVSync webdavSync;
+    private final NoteFileSync fileSync;
+    private final boolean useFileSync;  // 是否使用文件同步（新模式）
+    private NoteService noteService;
 
     private DbSyncService() {
         this.localDb = Paths.get(System.getProperty("user.dir"), "fastpig.db");
-        // 本地备份目录（已禁用，只使用坚果云云端备份）
-        this.cloudDir = Paths.get(System.getProperty("user.dir"), "data");
-        this.cloudDb = this.cloudDir.resolve("fastpig.db");
-        this.localBackupEnabled = false;  // 禁用本地备份
-        this.webdavSync = NutstoreWebDAVSync.getInstance();
+        this.fileSync = NoteFileSync.getInstance();
         
-        if (localBackupEnabled) {
-            System.out.println("[DbSync] 本地备份目录: " + this.cloudDir.toAbsolutePath());
+        // 默认使用文件同步模式
+        this.useFileSync = true;
+        
+        if (useFileSync) {
+            System.out.println("[DbSync] 使用文件级增量同步模式");
+        } else {
+            System.out.println("[DbSync] 使用整库同步模式（旧模式）");
         }
     }
 
-    public boolean isEnabled() { return webdavSync.isEnabled(); }
+    public void setNoteService(NoteService noteService) {
+        this.noteService = noteService;
+        if (fileSync != null) {
+            fileSync.setNoteService(noteService);
+        }
+    }
+
+    public boolean isEnabled() { 
+        return fileSync.isEnabled(); 
+    }
 
     /**
      * 启动时同步策略：
-     * 1. 优先从坚果云 WebDAV 拉取（如果配置了）
-     * 2. 否则从本地 data 目录拉取
+     * - 文件同步模式：智能决定上传/下载
+     * - 整库模式：从云端拉取最新数据库
      */
     public boolean syncFromCloudOnStart() {
-        // 优先尝试 WebDAV 同步
-        if (webdavSync.isEnabled()) {
-            webdavSync.syncFromCloudOnStart();
+        System.out.println(">>> [DbSyncService] syncFromCloudOnStart() 被调用");
+        
+        if (useFileSync) {
+            // 文件同步模式
+            fileSync.syncOnStart();
+            return true;
         }
         
-        // 同时进行本地备份同步
-        if (!localBackupEnabled) return false;
-        try {
-            if (!Files.exists(cloudDb)) {
-                System.out.println("[DbSync] 本地备份不存在，跳过拉取");
-                return false;
-            }
-            if (!Files.exists(localDb)) {
-                ensureCloudDir();
-                Files.copy(cloudDb, localDb, StandardCopyOption.REPLACE_EXISTING);
-                System.out.println("[DbSync] 启动：已从本地备份拉取");
-                return true;
-            }
-            long cloudTs = Files.getLastModifiedTime(cloudDb).toMillis();
-            long localTs = Files.getLastModifiedTime(localDb).toMillis();
-            if (cloudTs > localTs) {
-                Files.copy(cloudDb, localDb, StandardCopyOption.REPLACE_EXISTING);
-                System.out.println("[DbSync] 启动：本地备份较新，已覆盖");
-                return true;
-            }
-            System.out.println("[DbSync] 启动：本地已是最新，跳过拉取");
-            return false;
-        } catch (IOException e) {
-            System.err.println("[DbSync] 启动拉取失败: " + e.getMessage());
-            return false;
-        }
+        // 旧的整库同步模式（保留向后兼容）
+        return legacySyncFromCloudOnStart();
     }
 
     /**
      * 上传到云端策略：
-     * 0. 执行 WAL checkpoint 确保所有数据写入主文件
-     * 1. 先保存到本地 data 目录备份
-     * 2. 再上传到坚果云 WebDAV（如果配置了）
+     * - 文件同步模式：增量上传变更的文件
+     * - 整库模式：上传整个数据库
      */
     public boolean syncToCloud() {
         System.out.println(">>> [DbSyncService] syncToCloud() 被调用");
-        System.out.println(">>> [DbSyncService] 本地数据库: " + localDb);
-        System.out.println(">>> [DbSyncService] 本地备份启用: " + localBackupEnabled);
-        System.out.println(">>> [DbSyncService] WebDAV 启用: " + webdavSync.isEnabled());
+        System.out.println(">>> [DbSyncService] 使用文件同步: " + useFileSync);
         
-        // 0. 执行 WAL checkpoint 确保数据写入主文件
-        System.out.println(">>> [DbSyncService] 执行 WAL checkpoint...");
-        if (!checkpointWAL()) {
-            System.err.println(">>> [DbSyncService] ⚠️ WAL checkpoint 失败，但继续上传");
-        } else {
-            System.out.println(">>> [DbSyncService] ✅ WAL checkpoint 完成");
+        if (useFileSync) {
+            // 文件同步模式
+            return fileSync.syncToCloud();
         }
         
-        boolean success = true;
-        
-        // 1. 本地备份
-        if (localBackupEnabled) {
-            System.out.println(">>> [DbSyncService] 开始本地备份...");
-            try {
-                if (!Files.exists(localDb)) {
-                    System.out.println(">>> [DbSyncService] ❌ 本地数据库不存在: " + localDb);
-                    return false;
-                }
-                System.out.println(">>> [DbSyncService] 本地数据库存在，大小: " + Files.size(localDb) + " bytes");
-                ensureCloudDir();
-                Files.copy(localDb, cloudDb, StandardCopyOption.REPLACE_EXISTING);
-                System.out.println(">>> [DbSyncService] ✅ 已保存到本地备份: " + cloudDb);
-            } catch (IOException e) {
-                System.err.println(">>> [DbSyncService] ❌ 本地备份失败: " + e.getMessage());
-                e.printStackTrace();
-                success = false;
-            }
-        } else {
-            System.out.println(">>> [DbSyncService] 本地备份未启用，跳过");
-        }
-        
-        // 2. WebDAV 同步
-        if (webdavSync.isEnabled()) {
-            System.out.println(">>> [DbSyncService] 开始 WebDAV 同步...");
-            boolean webdavSuccess = webdavSync.syncToCloud();
-            System.out.println(">>> [DbSyncService] WebDAV 同步结果: " + (webdavSuccess ? "成功" : "失败"));
-            success = success && webdavSuccess;
-        } else {
-            System.out.println(">>> [DbSyncService] WebDAV 未启用，跳过");
-        }
-        
-        System.out.println(">>> [DbSyncService] syncToCloud() 最终结果: " + (success ? "成功" : "失败"));
-        return success;
+        // 旧的整库同步模式
+        return legacySyncToCloud();
     }
 
     public void syncToCloudSilently() {
@@ -161,29 +113,95 @@ public class DbSyncService {
     }
 
     /**
-     * 从云端下载策略（Alt+U 触发）：
-     * 强制从坚果云 WebDAV 下载，覆盖本地数据库
+     * 带超时的同步（退出时使用）
+     * @param timeoutSeconds 超时秒数
+     * @return true 如果同步成功或超时
      */
-    public boolean syncFromCloud() {
-        System.out.println(">>> [DbSyncService] syncFromCloud() 被调用");
-        System.out.println(">>> [DbSyncService] WebDAV 启用: " + webdavSync.isEnabled());
-        
-        // 仅支持 WebDAV 同步
-        if (webdavSync.isEnabled()) {
-            System.out.println(">>> [DbSyncService] 开始从 WebDAV 下载...");
-            boolean result = webdavSync.syncFromCloud();
-            System.out.println(">>> [DbSyncService] WebDAV 下载结果: " + (result ? "成功" : "失败"));
-            return result;
-        } else {
-            System.out.println(">>> [DbSyncService] ❌ 云端同步未启用，无法下载");
+    public boolean syncToCloudWithTimeout(int timeoutSeconds) {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<Boolean> future = executor.submit(() -> {
+            try {
+                return syncToCloud();
+            } catch (Throwable e) {
+                System.err.println("[DbSync] 同步失败: " + e.getMessage());
+                return false;
+            }
+        });
+
+        try {
+            return future.get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            System.out.println("[DbSync] 同步超时（" + timeoutSeconds + "秒），跳过同步");
+            future.cancel(true);
             return false;
+        } catch (Exception e) {
+            System.err.println("[DbSync] 同步异常: " + e.getMessage());
+            return false;
+        } finally {
+            executor.shutdownNow();
         }
     }
 
-    private void ensureCloudDir() throws IOException {
-        if (!Files.exists(cloudDir)) {
-            Files.createDirectories(cloudDir);
+    /**
+     * 从云端下载策略：
+     * - 文件同步模式：增量下载变更的文件
+     * - 整库模式：下载整个数据库
+     */
+    public boolean syncFromCloud() {
+        System.out.println(">>> [DbSyncService] syncFromCloud() 被调用");
+        System.out.println(">>> [DbSyncService] 使用文件同步: " + useFileSync);
+        
+        if (useFileSync) {
+            // 文件同步模式
+            return fileSync.syncFromCloud();
         }
+        
+        // 旧的整库同步模式
+        return legacySyncFromCloud();
+    }
+
+    // ===== 以下是旧的整库同步方法（保留向后兼容）=====
+
+    /**
+     * 旧模式：启动时从云端下载数据库
+     */
+    private boolean legacySyncFromCloudOnStart() {
+        NutstoreWebDAVSync webdavSync = NutstoreWebDAVSync.getInstance();
+        if (webdavSync.isEnabled()) {
+            webdavSync.syncFromCloudOnStart();
+        }
+        return false;
+    }
+
+    /**
+     * 旧模式：上传整个数据库到云端
+     */
+    private boolean legacySyncToCloud() {
+        System.out.println(">>> [DbSyncService] 执行旧模式整库同步");
+        
+        // 0. 执行 WAL checkpoint 确保数据写入主文件
+        if (!checkpointWAL()) {
+            System.err.println(">>> [DbSyncService] ⚠️ WAL checkpoint 失败，但继续上传");
+        }
+        
+        // 使用旧的 WebDAV 同步
+        NutstoreWebDAVSync webdavSync = NutstoreWebDAVSync.getInstance();
+        if (webdavSync.isEnabled()) {
+            return webdavSync.syncToCloud();
+        }
+        
+        return false;
+    }
+
+    /**
+     * 旧模式：从云端下载整个数据库
+     */
+    private boolean legacySyncFromCloud() {
+        NutstoreWebDAVSync webdavSync = NutstoreWebDAVSync.getInstance();
+        if (webdavSync.isEnabled()) {
+            return webdavSync.syncFromCloud();
+        }
+        return false;
     }
     
     /**
@@ -195,17 +213,13 @@ public class DbSyncService {
         try (Connection conn = DriverManager.getConnection(jdbcUrl);
              Statement stmt = conn.createStatement()) {
             
-            System.out.println(">>> [DbSyncService] 连接到数据库: " + jdbcUrl);
-            
             // 执行 PRAGMA wal_checkpoint(TRUNCATE)
-            // TRUNCATE 模式会将 WAL 文件清空，确保所有数据都在主文件中
             stmt.execute("PRAGMA wal_checkpoint(TRUNCATE)");
-            System.out.println(">>> [DbSyncService] WAL checkpoint(TRUNCATE) 执行成功");
+            System.out.println(">>> [DbSyncService] WAL checkpoint 执行成功");
             
             return true;
         } catch (Exception e) {
             System.err.println(">>> [DbSyncService] ❌ WAL checkpoint 失败: " + e.getMessage());
-            e.printStackTrace();
             return false;
         }
     }

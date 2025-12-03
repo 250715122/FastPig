@@ -426,9 +426,16 @@ public class HotKeyManager {
     }
     
     /**
-     * 退出应用程序
+     * 退出应用程序（带超时同步）
      */
     private void exitApplication() {
+        System.out.println("[退出] 正在同步数据库到云端（最多等待5秒）...");
+        boolean synced = DbSyncService.getInstance().syncToCloudWithTimeout(5);
+        if (synced) {
+            System.out.println("[退出] 同步完成，退出程序");
+        } else {
+            System.out.println("[退出] 同步跳过或超时，直接退出程序");
+        }
         cleanup();
         System.exit(0);
     }

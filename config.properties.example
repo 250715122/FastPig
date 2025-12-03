@@ -1,17 +1,60 @@
 # FastPig 配置文件
-# 复制此文件为 config.properties 并填入你的坚果云账号信息
+# 复制此文件为 config.properties 并填入你的账号信息
 
+# ================================================
+# 云存储配置
+# ================================================
+
+# 云存储提供商: nutstore | aliyun | tencent | local | none
+# - nutstore: 坚果云 WebDAV（当前支持）
+# - aliyun: 阿里云 OSS（预留）
+# - tencent: 腾讯云 COS（预留）
+# - local: 本地备份（预留）
+# - none: 禁用云同步
+cloud.provider=nutstore
+
+# ================================================
 # 坚果云 WebDAV 配置
+# ================================================
+
 # 用户名（坚果云注册邮箱）
-nutstore.username=250715122@qq.com
+nutstore.username=your@email.com
 
 # 应用密码（不是登录密码！需要在坚果云网页端生成）
 # 获取方式：坚果云网页端 -> 账户信息 -> 安全选项 -> 添加应用密码
-nutstore.password=aqgd7w2f52j6g5sg
+nutstore.password=your_app_password
 
 # WebDAV 服务器地址（一般不需要修改）
 nutstore.webdav.base=https://dav.jianguoyun.com/dav/
 
-# 同步文件路径（相对于 WebDAV 根目录，一般不需要修改）
-nutstore.sync.path=FastPig/fastpig.db
+# 同步文件路径（相对于 WebDAV 根目录）
+# 新模式同步 notes 目录，旧模式同步数据库文件
+nutstore.sync.path=FastPig/notes
 
+# ================================================
+# 阿里云 OSS 配置（预留）
+# ================================================
+
+# aliyun.endpoint=oss-cn-hangzhou.aliyuncs.com
+# aliyun.accessKeyId=your_access_key_id
+# aliyun.accessKeySecret=your_access_key_secret
+# aliyun.bucketName=fastpig-notes
+
+# ================================================
+# 腾讯云 COS 配置（预留）
+# ================================================
+
+# tencent.secretId=your_secret_id
+# tencent.secretKey=your_secret_key
+# tencent.region=ap-guangzhou
+# tencent.bucketName=fastpig-notes
+
+# ================================================
+# 向量检索配置（预留）
+# ================================================
+
+# 向量检索提供商: none | sqlite-vec | lucene
+# - none: 禁用向量检索（默认）
+# - sqlite-vec: 使用 sqlite-vec 扩展
+# - lucene: 使用 Apache Lucene
+vector.provider=none

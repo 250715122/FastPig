@@ -33,6 +33,13 @@ import com.vladsch.flexmark.util.misc.Extension;
 import java.util.Arrays;
 import com.vladsch.flexmark.html2md.converter.FlexmarkHtmlConverter;
 import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Clipboard;
+import java.awt.Toolkit;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import org.scilab.forge.jlatexmath.TeXConstants;
 import org.scilab.forge.jlatexmath.TeXFormula;
 import org.scilab.forge.jlatexmath.TeXIcon;
@@ -183,6 +190,7 @@ public class UnifiedNoteAppFrame extends JFrame {
     }
 
     private final NoteRepository repository;
+    private final com.gt.service.NoteService noteService;
     private TrayIcon trayIcon; // 系统托盘图标
 
     // 首行承载"快捷命令 空格 描述"，不再使用独立的输入框
@@ -234,6 +242,7 @@ public class UnifiedNoteAppFrame extends JFrame {
     public UnifiedNoteAppFrame(NoteRepository repository) {
         super("迅猪");
         this.repository = repository;
+        this.noteService = com.gt.service.NoteService.getInstance(repository);
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setSize(1100, 720);
         setLocationRelativeTo(null);
@@ -345,6 +354,10 @@ public class UnifiedNoteAppFrame extends JFrame {
             }
         });
         bodyArea.setLineWrap(true);
+        
+        // 设置图片粘贴处理器
+        setupImagePasteHandler();
+        
         bodyScrollPane = new JScrollPane(bodyArea);
         
         // 添加行号显示组件到 JScrollPane 的左侧行头
@@ -1196,6 +1209,10 @@ public class UnifiedNoteAppFrame extends JFrame {
         // 为没有锚点ID的标题自动添加锚点
         String withAnchors = addHeadingAnchors(normalized);
         String html = renderMarkdown(withAnchors);
+        
+        // 将相对图片路径转换为绝对路径（用于预览本地图片）
+        html = convertImagePathsToAbsolute(html);
+        
         try {
             String snippet = mdWithImgs.length() > 200 ? mdWithImgs.substring(0, 200) + "..." : mdWithImgs;
             System.out.println("[预览] Markdown 片段: \n" + snippet);
@@ -1778,7 +1795,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         n.createdAt = now;
         n.updatedAt = now;
         n.version = 1;
-        repository.save(n);
+        // 使用 NoteService 保存（同时写入文件和索引）
+        noteService.save(n);
         // 只更新 current，不重新加载文本
         current = n;
         updateEditorStatus();
@@ -1818,7 +1836,8 @@ public class UnifiedNoteAppFrame extends JFrame {
             n.createdAt = now;
             n.updatedAt = now;
             n.version = 1;
-            repository.save(n);
+            // 使用 NoteService 保存（同时写入文件和索引）
+            noteService.save(n);
             // 只更新 current，不重新加载文本
             current = n;
             updateEditorStatus();
@@ -1839,7 +1858,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         current.bodyMd = parsed[3];
         current.updatedAt = System.currentTimeMillis();
         current.version = Math.max(1, current.version + 1);
-        repository.save(current);
+        // 使用 NoteService 保存（同时写入文件和索引）
+        noteService.save(current);
         // 只更新状态，不重新加载文本
         updateEditorStatus();
         // 恢复选区状态
@@ -1875,7 +1895,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         }
         int opt = JOptionPane.showConfirmDialog(this, "确认删除（可恢复）?", "确认", JOptionPane.YES_NO_OPTION);
         if (opt == JOptionPane.YES_OPTION) {
-            repository.softDelete(current.id);
+            // 使用 NoteService 删除（同时更新文件和索引）
+            noteService.delete(current.id);
             // 保存最近一次删除，用于撤销
             lastDeletedKey = current.key;
             lastDeletedExpireAt = System.currentTimeMillis() + 60000; // 60秒内可撤销
@@ -2230,9 +2251,13 @@ public class UnifiedNoteAppFrame extends JFrame {
      * 退出应用程序（同步数据后退出）
      */
     private void exitApplication() {
-        System.out.println("[退出] 正在同步数据库到云端...");
-        DbSyncService.getInstance().syncToCloudSilently();
-        System.out.println("[退出] 同步完成，退出程序");
+        System.out.println("[退出] 正在同步数据库到云端（最多等待5秒）...");
+        boolean synced = DbSyncService.getInstance().syncToCloudWithTimeout(5);
+        if (synced) {
+            System.out.println("[退出] 同步完成，退出程序");
+        } else {
+            System.out.println("[退出] 同步跳过或超时，直接退出程序");
+        }
         
         // 移除托盘图标
         if (trayIcon != null) {
@@ -2860,6 +2885,11 @@ public class UnifiedNoteAppFrame extends JFrame {
 
     private void doPasteWithChoice(boolean forcePlain){
         try{
+            // 首先尝试粘贴图片（截图或从文件管理器复制的图片）
+            if (!forcePlain && tryPasteImage()) {
+                return; // 已成功粘贴图片
+            }
+            
             java.awt.datatransfer.Clipboard cb = Toolkit.getDefaultToolkit().getSystemClipboard();
             Transferable t = cb.getContents(null);
             if (t == null){ bodyArea.paste(); return; }
@@ -2949,6 +2979,272 @@ public class UnifiedNoteAppFrame extends JFrame {
             }
         }catch(Exception ignored){}
         return null;
+    }
+
+    // ==================== 图片粘贴功能 ====================
+
+    /**
+     * 设置图片粘贴处理器
+     * 支持：截图粘贴、从文件管理器复制图片文件粘贴
+     */
+    private void setupImagePasteHandler() {
+        // 保存原来的 TransferHandler，用于处理非图片粘贴
+        final TransferHandler originalHandler = bodyArea.getTransferHandler();
+        
+        bodyArea.setTransferHandler(new TransferHandler() {
+            @Override
+            public boolean canImport(TransferSupport support) {
+                // 支持图片和文件
+                if (support.isDataFlavorSupported(DataFlavor.imageFlavor)) {
+                    return true;
+                }
+                if (support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+                    return true;
+                }
+                // 其他类型交给原处理器
+                return originalHandler != null && originalHandler.canImport(support);
+            }
+
+            @Override
+            public boolean importData(TransferSupport support) {
+                try {
+                    Transferable t = support.getTransferable();
+                    
+                    // 尝试处理图片数据（截图）
+                    if (t.isDataFlavorSupported(DataFlavor.imageFlavor)) {
+                        BufferedImage image = (BufferedImage) t.getTransferData(DataFlavor.imageFlavor);
+                        if (image != null) {
+                            return handleImagePaste(image, "png");
+                        }
+                    }
+                    
+                    // 尝试处理文件列表（从文件管理器复制的图片）
+                    if (t.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+                        @SuppressWarnings("unchecked")
+                        java.util.List<File> files = (java.util.List<File>) t.getTransferData(DataFlavor.javaFileListFlavor);
+                        for (File file : files) {
+                            if (isImageFile(file)) {
+                                return handleImageFilePaste(file);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    System.err.println("[ImagePaste] 粘贴失败: " + e.getMessage());
+                }
+                
+                // 非图片粘贴，交给原处理器
+                return originalHandler != null && originalHandler.importData(support);
+            }
+        });
+        
+        // 注意：Ctrl+V 快捷键由 installPasteHandlers 处理
+        // 图片粘贴逻辑已整合到 doPasteWithChoice 方法中
+    }
+
+    /**
+     * 尝试从剪贴板粘贴图片
+     * @return true 如果成功粘贴了图片，false 如果剪贴板中不是图片
+     */
+    private boolean tryPasteImage() {
+        try {
+            Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+            Transferable t = clipboard.getContents(null);
+            
+            if (t == null) return false;
+            
+            // 尝试获取图片数据（截图）
+            if (t.isDataFlavorSupported(DataFlavor.imageFlavor)) {
+                BufferedImage image = (BufferedImage) t.getTransferData(DataFlavor.imageFlavor);
+                if (image != null) {
+                    return handleImagePaste(image, "png");
+                }
+            }
+            
+            // 尝试获取文件列表（从文件管理器复制的图片）
+            if (t.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+                @SuppressWarnings("unchecked")
+                java.util.List<File> files = (java.util.List<File>) t.getTransferData(DataFlavor.javaFileListFlavor);
+                for (File file : files) {
+                    if (isImageFile(file)) {
+                        return handleImageFilePaste(file);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[ImagePaste] 检测剪贴板失败: " + e.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * 处理图片数据粘贴（截图）
+     */
+    private boolean handleImagePaste(BufferedImage image, String format) {
+        try {
+            // 确保笔记已保存（需要 folderPath）
+            if (current == null || current.folderPath == null || current.folderPath.isEmpty()) {
+                // 先提示用户保存笔记
+                int opt = JOptionPane.showConfirmDialog(this, 
+                    "粘贴图片前需要先保存笔记。\n是否立即保存？", 
+                    "保存笔记", JOptionPane.YES_NO_OPTION);
+                if (opt != JOptionPane.YES_OPTION) {
+                    return false;
+                }
+                saveUnified(true);
+                // 保存后再次检查
+                if (current == null || current.folderPath == null || current.folderPath.isEmpty()) {
+                    JOptionPane.showMessageDialog(this, "保存失败，无法粘贴图片", "错误", JOptionPane.ERROR_MESSAGE);
+                    return false;
+                }
+            }
+            
+            // 创建 assets 目录
+            Path assetsDir = Paths.get(current.folderPath, "assets");
+            if (!Files.exists(assetsDir)) {
+                Files.createDirectories(assetsDir);
+            }
+            
+            // 生成唯一文件名
+            String fileName = "img_" + System.currentTimeMillis() + "." + format;
+            Path imagePath = assetsDir.resolve(fileName);
+            
+            // 保存图片
+            ImageIO.write(image, format, imagePath.toFile());
+            System.out.println("[ImagePaste] 图片已保存: " + imagePath);
+            
+            // 在光标位置插入 Markdown 图片引用
+            String markdownRef = "![](assets/" + fileName + ")";
+            bodyArea.replaceSelection(markdownRef);
+            
+            statusLeft.setText("已粘贴图片: " + fileName);
+            return true;
+            
+        } catch (Exception e) {
+            System.err.println("[ImagePaste] 保存图片失败: " + e.getMessage());
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "保存图片失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+    }
+
+    /**
+     * 处理图片文件粘贴（从文件管理器复制）
+     */
+    private boolean handleImageFilePaste(File sourceFile) {
+        try {
+            // 确保笔记已保存
+            if (current == null || current.folderPath == null || current.folderPath.isEmpty()) {
+                int opt = JOptionPane.showConfirmDialog(this, 
+                    "粘贴图片前需要先保存笔记。\n是否立即保存？", 
+                    "保存笔记", JOptionPane.YES_NO_OPTION);
+                if (opt != JOptionPane.YES_OPTION) {
+                    return false;
+                }
+                saveUnified(true);
+                if (current == null || current.folderPath == null || current.folderPath.isEmpty()) {
+                    JOptionPane.showMessageDialog(this, "保存失败，无法粘贴图片", "错误", JOptionPane.ERROR_MESSAGE);
+                    return false;
+                }
+            }
+            
+            // 创建 assets 目录
+            Path assetsDir = Paths.get(current.folderPath, "assets");
+            if (!Files.exists(assetsDir)) {
+                Files.createDirectories(assetsDir);
+            }
+            
+            // 获取文件扩展名
+            String originalName = sourceFile.getName();
+            String ext = originalName.contains(".") ? 
+                originalName.substring(originalName.lastIndexOf(".") + 1).toLowerCase() : "png";
+            
+            // 生成唯一文件名（保留原始文件名作为参考）
+            String baseName = originalName.contains(".") ? 
+                originalName.substring(0, originalName.lastIndexOf(".")) : originalName;
+            // 清理文件名中的特殊字符
+            baseName = baseName.replaceAll("[^a-zA-Z0-9_\\-]", "_");
+            String fileName = baseName + "_" + System.currentTimeMillis() + "." + ext;
+            Path targetPath = assetsDir.resolve(fileName);
+            
+            // 复制文件
+            Files.copy(sourceFile.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+            System.out.println("[ImagePaste] 图片已复制: " + targetPath);
+            
+            // 在光标位置插入 Markdown 图片引用
+            String markdownRef = "![](assets/" + fileName + ")";
+            bodyArea.replaceSelection(markdownRef);
+            
+            statusLeft.setText("已粘贴图片: " + fileName);
+            return true;
+            
+        } catch (Exception e) {
+            System.err.println("[ImagePaste] 复制图片失败: " + e.getMessage());
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "复制图片失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+    }
+
+    /**
+     * 判断文件是否为图片
+     */
+    private boolean isImageFile(File file) {
+        if (file == null || !file.isFile()) return false;
+        String name = file.getName().toLowerCase();
+        return name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") ||
+               name.endsWith(".gif") || name.endsWith(".bmp") || name.endsWith(".webp");
+    }
+
+    /**
+     * 获取当前笔记的文件夹路径
+     * 用于预览时将相对路径转换为绝对路径
+     */
+    private String getCurrentNoteFolderPath() {
+        if (current != null && current.folderPath != null && !current.folderPath.isEmpty()) {
+            return current.folderPath;
+        }
+        return null;
+    }
+
+    /**
+     * 将 HTML 中的相对图片路径转换为绝对路径
+     * 这样 JEditorPane 才能正确加载本地图片
+     */
+    private String convertImagePathsToAbsolute(String html) {
+        String folderPath = getCurrentNoteFolderPath();
+        if (folderPath == null || html == null) {
+            return html;
+        }
+        
+        try {
+            // 将 Windows 路径转换为 file:// URI 格式
+            Path folder = Paths.get(folderPath);
+            String fileUri = folder.toUri().toString();
+            // 确保 URI 以 / 结尾
+            if (!fileUri.endsWith("/")) {
+                fileUri = fileUri + "/";
+            }
+            
+            // 替换相对路径 src="assets/xxx" 为绝对路径
+            // 匹配 <img src="assets/..."> 或 <img src='assets/...'>
+            html = html.replaceAll(
+                "(<img[^>]*\\ssrc=[\"'])assets/([^\"']+)([\"'][^>]*>)",
+                "$1" + fileUri + "assets/$2$3"
+            );
+            
+            // 也处理不带引号的情况（虽然不标准，但以防万一）
+            html = html.replaceAll(
+                "(<img[^>]*\\ssrc=)assets/([^\\s>]+)",
+                "$1" + fileUri + "assets/$2"
+            );
+            
+            System.out.println("[预览] 图片路径已转换，基础路径: " + fileUri);
+            
+        } catch (Exception e) {
+            System.err.println("[预览] 图片路径转换失败: " + e.getMessage());
+        }
+        
+        return html;
     }
 }
 

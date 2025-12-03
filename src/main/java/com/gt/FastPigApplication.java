@@ -52,12 +52,27 @@ public class FastPigApplication extends JFrame {
         
         System.out.println("启动 FastPig 应用程序...");
         
-        // 启动前：尝试从坚果云目录拉取最新数据库
-        logger.info("开始同步数据库...");
+        // 初始化存储
+        NoteRepository repo = new NoteRepository(System.getProperty("user.dir") + "/fastpig.db");
+        com.gt.storage.NoteFileStorage fileStorage = com.gt.storage.NoteFileStorage.getInstance();
+        com.gt.service.NoteService noteService = com.gt.service.NoteService.getInstance(repo);
+        
+        // 数据迁移：将现有数据库中的笔记导出为文件
+        logger.info("检查数据迁移...");
+        com.gt.migration.DataMigration migration = new com.gt.migration.DataMigration(repo, fileStorage);
+        int migratedCount = migration.migrateIfNeeded();
+        if (migratedCount > 0) {
+            logger.info("数据迁移完成: {} 个笔记", migratedCount);
+        }
+        
+        // 设置 DbSyncService 的 NoteService 引用
+        DbSyncService.getInstance().setNoteService(noteService);
+        
+        // 启动前：同步（使用新的文件同步模式）
+        logger.info("开始同步...");
         DbSyncService.getInstance().syncFromCloudOnStart();
         
         // 启动统一界面
-        NoteRepository repo = new NoteRepository(System.getProperty("user.dir") + "/fastpig.db");
         UnifiedNoteAppFrame unified = new UnifiedNoteAppFrame(repo);
         unified.setVisible(true);
         // 同时初始化热键（Alt+S 可再次呼出界面）
