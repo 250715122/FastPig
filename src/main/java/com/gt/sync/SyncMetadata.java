@@ -198,6 +198,21 @@ public class SyncMetadata {
             }
         }
         
+        // 解析 version
+        idx = json.indexOf("\"version\"");
+        if (idx >= 0) {
+            int colonIdx = json.indexOf(":", idx);
+            int commaIdx = json.indexOf(",", colonIdx);
+            if (commaIdx < 0) commaIdx = json.indexOf("}", colonIdx);
+            if (commaIdx < 0) commaIdx = json.length();
+            String value = json.substring(colonIdx + 1, commaIdx).trim();
+            try {
+                fm.version = Integer.parseInt(value);
+            } catch (NumberFormatException e) {
+                fm.version = 0;
+            }
+        }
+        
         return fm;
     }
 
@@ -260,6 +275,39 @@ public class SyncMetadata {
     }
 
     /**
+     * 更新文件元数据（包含版本号）
+     */
+    public void updateFileWithVersion(String path, long lastModified, long size, int version) {
+        FileMetadata fm = files.computeIfAbsent(path, k -> new FileMetadata());
+        fm.path = path;
+        fm.lastModified = lastModified;
+        fm.size = size;
+        fm.version = version;
+    }
+
+    /**
+     * 从 JSON 字符串解析（用于云端下载的 meta）
+     */
+    public static SyncMetadata parseFromJson(String json) {
+        if (json == null || json.isEmpty()) {
+            return null;
+        }
+        try {
+            return parse(json);
+        } catch (Exception e) {
+            System.err.println("[SyncMetadata] 解析云端 meta 失败: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 序列化为 JSON 字符串（用于上传到云端）
+     */
+    public String toJson() {
+        return serialize();
+    }
+
+    /**
      * 文件元数据
      */
     public static class FileMetadata {
@@ -268,11 +316,13 @@ public class SyncMetadata {
         public long size;
         public String hash;
         public long cloudModified; // 云端文件的修改时间
+        public int version;        // 笔记版本号（来自 note.md front matter）
 
         public String toJson() {
             return "{\"lastModified\": " + lastModified + 
                    ", \"size\": " + size + 
                    ", \"cloudModified\": " + cloudModified +
+                   ", \"version\": " + version +
                    ", \"hash\": \"" + (hash != null ? hash : "") + "\"}";
         }
     }

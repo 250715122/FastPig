@@ -111,6 +111,9 @@ public class NoteFileSync {
             syncMeta.setLastSyncTime(System.currentTimeMillis());
             syncMeta.save(notesDir);
 
+            // 上传 .sync_meta.json 到云端（用于跨设备版本比较）
+            uploadSyncMetaToCloud(syncMeta);
+
             long elapsed = System.currentTimeMillis() - startTime;
             System.out.println("[NoteFileSync] 上传同步完成: 成功 " + uploadedCount + " 个, 失败 " + failedCount + " 个, 跳过 " + skippedCount + " 个, 耗时 " + elapsed + "ms");
 
@@ -125,6 +128,7 @@ public class NoteFileSync {
 
     /**
      * 从云端下载同步
+     * 优先使用云端 .sync_meta.json 进行版本号快速比较
      * 使用 5 线程并发下载，每个任务间隔 0.3 秒
      */
     public boolean syncFromCloud() {
@@ -138,8 +142,12 @@ public class NoteFileSync {
 
         try {
             Path notesDir = fileStorage.getNotesDir();
-            SyncMetadata syncMeta = SyncMetadata.load(notesDir);
-            boolean metaChanged = normalizeSyncMeta(syncMeta);
+            SyncMetadata localMeta = SyncMetadata.load(notesDir);
+            boolean metaChanged = normalizeSyncMeta(localMeta);
+
+            // 尝试下载云端的 .sync_meta.json 进行快速版本比较
+            SyncMetadata cloudMeta = downloadCloudMeta();
+            boolean useVersionCompare = (cloudMeta != null && !cloudMeta.getFiles().isEmpty());
 
             // 获取云端文件夹列表
             List<CloudFileInfo> cloudFolders = cloudProvider.listFiles("");
@@ -152,7 +160,11 @@ public class NoteFileSync {
             int totalFolders = (int) cloudFolders.stream().filter(f -> f.isDirectory() && !f.getName().startsWith(".")).count();
             int checkCount = 0;
             
-            System.out.println("[NoteFileSync] 开始检查 " + totalFolders + " 个文件夹...");
+            if (useVersionCompare) {
+                System.out.println("[NoteFileSync] 使用版本号快速比较模式...");
+            } else {
+                System.out.println("[NoteFileSync] 开始检查 " + totalFolders + " 个文件夹...");
+            }
 
             for (CloudFileInfo cloudFolder : cloudFolders) {
                 if (!cloudFolder.isDirectory()) {
@@ -165,15 +177,21 @@ public class NoteFileSync {
                 }
 
                 checkCount++;
-                // 每检查 10 个文件夹输出一次进度
-                if (checkCount % 10 == 0 || checkCount == totalFolders) {
-                    System.out.println("[NoteFileSync] 检查进度: " + checkCount + "/" + totalFolders);
-                }
-
                 Path localFolder = notesDir.resolve(folderName);
 
-                // 检查是否需要下载
-                if (shouldDownload(cloudFolder, localFolder, syncMeta)) {
+                boolean needDownload;
+                if (useVersionCompare) {
+                    // 快速版本比较：直接对比版本号
+                    needDownload = shouldDownloadByVersion(folderName, localFolder, localMeta, cloudMeta);
+                } else {
+                    // 传统模式：逐个检查（慢）
+                    if (checkCount % 10 == 0 || checkCount == totalFolders) {
+                        System.out.println("[NoteFileSync] 检查进度: " + checkCount + "/" + totalFolders);
+                    }
+                    needDownload = shouldDownload(cloudFolder, localFolder, localMeta);
+                }
+
+                if (needDownload) {
                     toDownload.add(new DownloadTask(folderName, localFolder, cloudFolder));
                 } else {
                     skippedCount.incrementAndGet();
@@ -232,7 +250,7 @@ public class NoteFileSync {
 
                 // 批量更新同步元数据
                 for (DownloadTask task : completedTasks) {
-                    updateSyncMetadataFromCloud(syncMeta, task.folderName, task.cloudInfo);
+                    updateSyncMetadataFromCloud(localMeta, task.folderName, task.cloudInfo);
                 }
             }
 
@@ -242,12 +260,13 @@ public class NoteFileSync {
                 noteService.rebuildIndexFromFiles();
             }
 
-            // 更新同步时间
-            syncMeta.setLastSyncTime(System.currentTimeMillis());
-            if (metaChanged) {
-                syncMeta.save(notesDir);
-            } else {
-                syncMeta.save(notesDir);
+            // 更新同步时间并保存
+            localMeta.setLastSyncTime(System.currentTimeMillis());
+            localMeta.save(notesDir);
+
+            // 如果有下载，同时更新云端的 .sync_meta.json
+            if (downloadedCount.get() > 0) {
+                uploadSyncMetaToCloud(localMeta);
             }
 
             long elapsed = System.currentTimeMillis() - startTime;
@@ -393,7 +412,52 @@ public class NoteFileSync {
     }
 
     /**
-     * 判断是否需要下载
+     * 基于版本号快速判断是否需要下载
+     * 只比较版本号，不调用 API，速度快
+     */
+    private boolean shouldDownloadByVersion(String folderName, Path localFolder, 
+            SyncMetadata localMeta, SyncMetadata cloudMeta) {
+        
+        // 本地不存在，需要下载
+        if (!Files.exists(localFolder)) {
+            System.out.println("[NoteFileSync] 新笔记（本地不存在）: " + folderName);
+            return true;
+        }
+
+        // 获取云端版本号
+        SyncMetadata.FileMetadata cloudFm = cloudMeta.getFiles().get(folderName);
+        if (cloudFm == null) {
+            // 云端 meta 中没有记录，可能是新文件或 meta 不完整
+            // 保守起见，不下载（等待传统模式检查）
+            return false;
+        }
+        int cloudVersion = cloudFm.version;
+
+        // 获取本地版本号
+        SyncMetadata.FileMetadata localFm = localMeta.getFiles().get(folderName);
+        int localVersion = 0;
+        if (localFm != null && localFm.version > 0) {
+            localVersion = localFm.version;
+        } else {
+            // 本地 meta 没有版本号，从文件读取
+            Path noteFile = localFolder.resolve("note.md");
+            if (Files.exists(noteFile)) {
+                localVersion = parseVersionFromFile(noteFile);
+            }
+        }
+
+        // 比较版本号
+        if (cloudVersion > localVersion) {
+            System.out.println("[NoteFileSync] 云端版本更高: " + folderName + 
+                " (本地 v" + localVersion + " < 云端 v" + cloudVersion + ")");
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * 判断是否需要下载（传统模式，需要调用 API）
      */
     private boolean shouldDownload(CloudFileInfo cloudFolder, Path localFolder, SyncMetadata syncMeta) {
         String folderName = cloudFolder.getName();
@@ -648,10 +712,26 @@ public class NoteFileSync {
             if (Files.exists(noteFile)) {
                 long modified = Files.getLastModifiedTime(noteFile).toMillis();
                 long size = Files.size(noteFile);
-                syncMeta.updateFile(relativePath, modified, size, "");
+                
+                // 读取 version（从 note.md front matter）
+                int version = parseVersionFromFile(noteFile);
+                
+                syncMeta.updateFileWithVersion(relativePath, modified, size, version);
             }
         } catch (IOException e) {
             // ignore
+        }
+    }
+
+    /**
+     * 从 note.md 文件读取 version
+     */
+    private int parseVersionFromFile(Path noteFile) {
+        try {
+            String content = Files.readString(noteFile, StandardCharsets.UTF_8);
+            return parseVersion(content);
+        } catch (Exception e) {
+            return 0;
         }
     }
 
@@ -668,17 +748,61 @@ public class NoteFileSync {
                 // 读取本地文件的实际修改时间和大小
                 long localModified = Files.getLastModifiedTime(noteFile).toMillis();
                 long localSize = Files.size(noteFile);
+                
+                // 读取 version
+                int version = parseVersionFromFile(noteFile);
 
-                // 仅使用 note.md 的精确信息；若获取不到，则使用本地时间作为 cloudModified 避免误判更新
-                CloudFileInfo noteInfo = cloudProvider.getFileInfo(folderName + "/note.md");
-                long cloudModified = noteInfo != null ? noteInfo.getLastModified() : localModified;
+                // 更新元数据（包含版本号）
+                SyncMetadata.FileMetadata fm = syncMeta.getFiles().computeIfAbsent(folderName, k -> new SyncMetadata.FileMetadata());
+                fm.path = folderName;
+                fm.lastModified = localModified;
+                fm.size = localSize;
+                fm.version = version;
+                fm.cloudModified = localModified; // 下载后本地时间即为云端时间
 
-                syncMeta.updateFileWithCloudTime(folderName, localModified, localSize, cloudModified);
                 System.out.println("[NoteFileSync] 已记录同步信息: " + folderName + 
-                    " (本地时间: " + localModified + ", 本地大小: " + localSize + ", 云端时间: " + cloudModified + ")");
+                    " (大小: " + localSize + ", 版本: v" + version + ")");
             }
         } catch (IOException e) {
             System.err.println("[NoteFileSync] 更新元数据失败: " + folderName + " - " + e.getMessage());
+        }
+    }
+
+    /**
+     * 上传 .sync_meta.json 到云端
+     */
+    private void uploadSyncMetaToCloud(SyncMetadata syncMeta) {
+        try {
+            String json = syncMeta.toJson();
+            byte[] data = json.getBytes(StandardCharsets.UTF_8);
+            if (cloudProvider.upload(".sync_meta.json", data)) {
+                System.out.println("[NoteFileSync] 已上传 .sync_meta.json 到云端 (" + data.length + " bytes)");
+            }
+        } catch (Exception e) {
+            System.err.println("[NoteFileSync] 上传 .sync_meta.json 失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 从云端下载 .sync_meta.json
+     * @return 云端的元数据，如果不存在或失败返回 null
+     */
+    private SyncMetadata downloadCloudMeta() {
+        try {
+            byte[] data = cloudProvider.download(".sync_meta.json");
+            if (data == null || data.length == 0) {
+                System.out.println("[NoteFileSync] 云端没有 .sync_meta.json，将使用传统方式检查");
+                return null;
+            }
+            String json = new String(data, StandardCharsets.UTF_8);
+            SyncMetadata cloudMeta = SyncMetadata.parseFromJson(json);
+            if (cloudMeta != null) {
+                System.out.println("[NoteFileSync] 已下载云端 .sync_meta.json (" + data.length + " bytes, " + cloudMeta.getFiles().size() + " 个文件记录)");
+            }
+            return cloudMeta;
+        } catch (Exception e) {
+            System.err.println("[NoteFileSync] 下载云端 .sync_meta.json 失败: " + e.getMessage());
+            return null;
         }
     }
 
