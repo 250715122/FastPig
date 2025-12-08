@@ -68,13 +68,19 @@ public class FastPigApplication extends JFrame {
         // 设置 DbSyncService 的 NoteService 引用
         DbSyncService.getInstance().setNoteService(noteService);
         
-        // 启动前：同步（使用新的文件同步模式）
-        logger.info("开始同步...");
-        DbSyncService.getInstance().syncFromCloudOnStart();
-        
-        // 启动统一界面
+        // 启动统一界面（先显示 GUI，同步在后台执行）
         UnifiedNoteAppFrame unified = new UnifiedNoteAppFrame(repo);
         unified.setVisible(true);
+        
+        // 后台线程执行同步（避免阻塞 GUI）
+        logger.info("开始后台同步...");
+        new Thread(() -> {
+            try {
+                DbSyncService.getInstance().syncFromCloudOnStart();
+            } catch (Exception e) {
+                System.err.println("[FastPigApplication] 后台同步失败: " + e.getMessage());
+            }
+        }, "CloudSync-Thread").start();
         // 同时初始化热键（Alt+S 可再次呼出界面）
         final FastPigApplication app = new FastPigApplication();
         app.initializeGUI();

@@ -1744,6 +1744,15 @@ public class UnifiedNoteAppFrame extends JFrame {
 
     private void loadNote(NoteDto n){
         if (n == null) return;
+        // 确保从文件加载最新正文
+        try {
+            NoteDto full = noteService.load(n.id);
+            if (full != null) {
+                n = full;
+            }
+        } catch (Exception e) {
+            System.err.println("加载笔记正文失败: " + n.id + " - " + e.getMessage());
+        }
         current = n;
         String first = (n.key==null? "" : n.key) + (n.desc!=null && !n.desc.isEmpty()? (" " + n.desc) : "");
         String body = n.bodyMd==null? "" : n.bodyMd;
@@ -1824,31 +1833,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         String newKey = parsed[1];
         // 如果快捷命令已改变，则按"保存为新"处理；否则更新当前
         if (!newKey.equals(current.key)) {
-            NoteDto n = new NoteDto();
-            n.id = UUID.randomUUID().toString();
-            n.key = newKey;
-            n.desc = parsed[2];
-            n.title = n.desc;
-            n.tags = new java.util.ArrayList<>();
-            n.bodyMd = parsed[3];
-            n.frontMatter = null;
-            long now = System.currentTimeMillis();
-            n.createdAt = now;
-            n.updatedAt = now;
-            n.version = 1;
-            // 使用 NoteService 保存（同时写入文件和索引）
-            noteService.save(n);
-            // 只更新 current，不重新加载文本
-            current = n;
-            updateEditorStatus();
-            // 恢复选区状态
-            try {
-                int textLength = bodyArea.getText().length();
-                int start = Math.min(selectionStart, textLength);
-                int end = Math.min(selectionEnd, textLength);
-                bodyArea.setSelectionStart(start);
-                bodyArea.setSelectionEnd(end);
-            } catch (Exception ignored) {}
+            JOptionPane.showMessageDialog(this, "当前版本不支持修改 key，请新建笔记后删除旧笔记。", "提示", JOptionPane.WARNING_MESSAGE);
             return;
         }
         current.key = newKey;

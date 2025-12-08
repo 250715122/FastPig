@@ -46,12 +46,6 @@ public class NoteService {
             throw new IllegalArgumentException("笔记或笔记ID不能为空");
         }
 
-        // 检查是否需要重命名文件夹（key 变化时）
-        NoteDto existing = repository.findById(note.id);
-        if (existing != null && existing.key != null && !existing.key.equals(note.key)) {
-            fileStorage.renameNoteFolder(note.id, existing.key, note.key);
-        }
-
         // 计算内容哈希
         note.contentHash = computeHash(note.bodyMd);
 

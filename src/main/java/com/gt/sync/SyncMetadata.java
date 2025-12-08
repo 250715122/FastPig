@@ -41,6 +41,13 @@ public class SyncMetadata {
     }
 
     /**
+     * 仅供测试：从字符串解析
+     */
+    public static SyncMetadata loadFromStringForTest(String json) {
+        return parse(json);
+    }
+
+    /**
      * 保存同步元数据到文件
      */
     public void save(Path notesDir) {
@@ -68,7 +75,7 @@ public class SyncMetadata {
 
         // 提取 lastSyncTime
         int idx = json.indexOf("\"lastSyncTime\"");
-        if (idx > 0) {
+        if (idx >= 0) {
             int colonIdx = json.indexOf(":", idx);
             int commaIdx = json.indexOf(",", colonIdx);
             if (commaIdx < 0) commaIdx = json.indexOf("}", colonIdx);

@@ -64,6 +64,7 @@ public class NoteFileSync {
         try {
             Path notesDir = fileStorage.getNotesDir();
             SyncMetadata syncMeta = SyncMetadata.load(notesDir);
+            normalizeSyncMeta(syncMeta);
             long lastSyncTime = syncMeta.getLastSyncTime();
 
             System.out.println("[NoteFileSync] 上次同步时间: " + new Date(lastSyncTime));
@@ -138,6 +139,7 @@ public class NoteFileSync {
         try {
             Path notesDir = fileStorage.getNotesDir();
             SyncMetadata syncMeta = SyncMetadata.load(notesDir);
+            boolean metaChanged = normalizeSyncMeta(syncMeta);
 
             // 获取云端文件夹列表
             List<CloudFileInfo> cloudFolders = cloudProvider.listFiles("");
@@ -231,7 +233,11 @@ public class NoteFileSync {
 
             // 更新同步时间
             syncMeta.setLastSyncTime(System.currentTimeMillis());
-            syncMeta.save(notesDir);
+            if (metaChanged) {
+                syncMeta.save(notesDir);
+            } else {
+                syncMeta.save(notesDir);
+            }
 
             long elapsed = System.currentTimeMillis() - startTime;
             System.out.println("[NoteFileSync] 下载同步完成: 成功 " + downloadedCount.get() + " 个, 失败 " + failedCount.get() + " 个, 跳过 " + skippedCount.get() + " 个, 耗时 " + elapsed + "ms");
@@ -321,7 +327,8 @@ public class NoteFileSync {
             }
 
             // 检查元数据中是否有记录
-            String relativePath = fileStorage.getNotesDir().relativize(folderPath).toString().replace("\\", "/");
+            // 纯 key 目录，relativePath 直接使用目录名（key）
+            String relativePath = folderPath.getFileName().toString();
             SyncMetadata.FileMetadata fm = syncMeta.getFiles().get(relativePath);
 
             if (fm == null) {
@@ -332,6 +339,14 @@ public class NoteFileSync {
 
             long fileModified = Files.getLastModifiedTime(noteFile).toMillis();
             long fileSize = Files.size(noteFile);
+
+            // 元数据自愈：如果历史 size/mtime 为 0，则用当前实际值修复，避免全量上传
+            if (fm.lastModified == 0 || fm.size == 0) {
+                fm.lastModified = fileModified;
+                fm.size = fileSize;
+                syncMeta.updateFile(relativePath, fileModified, fileSize, "");
+                return false; // 修复后本次不传，后续按正常增量判断
+            }
 
             // 比较文件修改时间和大小与 SyncMetadata 中记录的值
             // 只有当修改时间或大小变化时才需要上传
@@ -385,25 +400,49 @@ public class NoteFileSync {
                 return true;
             }
 
-            // 检查同步元数据：是否已经同步过这个文件夹
+            long localModified = Files.getLastModifiedTime(localNoteFile).toMillis();
+            long localSize = Files.size(localNoteFile);
+
+            // 获取云端 note.md 的精确信息，仅用于存在性与大小参考；mtime 不参与更新判定（坚果云 mtime=上传时间）
+            CloudFileInfo noteInfo = cloudProvider.getFileInfo(folderName + "/note.md");
+            if (noteInfo == null) {
+                // 无法获取信息，记录本地状态并跳过，等待下次
+                syncMeta.updateFileWithCloudTime(folderName, localModified, localSize, localModified);
+                return false;
+            }
+
+            long cloudSize = noteInfo.getSize();
+
+            // 检查同步元数据：是否已经同步过这个文件夹（key 为键）
             SyncMetadata.FileMetadata fm = syncMeta.getFiles().get(folderName);
             
             if (fm == null) {
-                // 首次建立同步关系：本地文件已存在，只记录云端时间戳，不下载
-                // 下次启动时会根据云端时间戳是否变化来判断
-                syncMeta.updateFileWithCloudTime(folderName, System.currentTimeMillis(), 
-                    cloudFolder.getSize(), cloudFolder.getLastModified());
+                // 首次：仅当大小不同才下载；mtime 不作为判定依据
+                if (cloudSize > 0 && cloudSize != localSize) {
+                    System.out.println("[NoteFileSync] 首次记录且大小不同，需下载: " + folderName);
+                    return true;
+                }
+                // 记录并跳过
+                syncMeta.updateFileWithCloudTime(folderName, localModified, localSize, localModified);
                 return false;
             }
-            
-            // 已同步过，检查云端是否有更新
-            if (cloudFolder.getLastModified() <= fm.cloudModified) {
-                // 云端没有更新，跳过
+
+            // 元数据缺损自愈：历史 size/mtime 为 0 时直接修复并跳过下载
+            if ((fm.size == 0 && localSize > 0) || fm.cloudModified == 0) {
+                long fixedCloud = (fm.cloudModified == 0) ? localModified : fm.cloudModified;
+                fm.size = localSize;
+                fm.cloudModified = fixedCloud;
+                syncMeta.updateFileWithCloudTime(folderName, localModified, localSize, fixedCloud);
                 return false;
             }
-            
-            // 云端有更新，需要下载比较版本号
-            System.out.println("[NoteFileSync] 云端有更新: " + folderName);
+
+            // 云端大小与记录相同 → 云端没变，直接跳过
+            if (cloudSize > 0 && cloudSize == fm.size) {
+                return false;  // 不需要下载
+            }
+
+            // 云端大小变了，需要版本判定
+            System.out.println("[NoteFileSync] 同步版本判定: " + folderName + " (云端 size: " + cloudSize + ", 记录 size: " + fm.size + ")");
             return resolveConflictIfNeeded(localFolder, folderName);
 
         } catch (Exception e) {
@@ -618,16 +657,63 @@ public class NoteFileSync {
                 // 读取本地文件的实际修改时间和大小
                 long localModified = Files.getLastModifiedTime(noteFile).toMillis();
                 long localSize = Files.size(noteFile);
-                long cloudModified = cloudFolder.getLastModified();
-                
-                // 记录本地文件信息 + 云端修改时间
+
+                // 仅使用 note.md 的精确信息；若获取不到，则使用本地时间作为 cloudModified 避免误判更新
+                CloudFileInfo noteInfo = cloudProvider.getFileInfo(folderName + "/note.md");
+                long cloudModified = noteInfo != null ? noteInfo.getLastModified() : localModified;
+
                 syncMeta.updateFileWithCloudTime(folderName, localModified, localSize, cloudModified);
                 System.out.println("[NoteFileSync] 已记录同步信息: " + folderName + 
-                    " (本地时间: " + localModified + ", 大小: " + localSize + ", 云端时间: " + cloudModified + ")");
+                    " (本地时间: " + localModified + ", 本地大小: " + localSize + ", 云端时间: " + cloudModified + ")");
             }
         } catch (IOException e) {
             System.err.println("[NoteFileSync] 更新元数据失败: " + folderName + " - " + e.getMessage());
         }
+    }
+
+    /**
+     * 兼容旧 key--uuid 的元数据：将 key--uuid 归并为 key
+     */
+    private boolean normalizeSyncMeta(SyncMetadata meta) {
+        Map<String, SyncMetadata.FileMetadata> files = meta.getFiles();
+        Map<String, SyncMetadata.FileMetadata> normalized = new HashMap<>();
+        boolean changed = false;
+
+        for (Map.Entry<String, SyncMetadata.FileMetadata> e : files.entrySet()) {
+            String key = e.getKey();
+            SyncMetadata.FileMetadata fm = e.getValue();
+
+            // 纯 key 已是新格式
+            if (!key.contains("--")) {
+                normalized.merge(key, fm, this::mergeMeta);
+                continue;
+            }
+
+            // 旧格式 key--uuid，截断为 key
+            String pureKey = key.substring(0, key.indexOf("--"));
+            normalized.merge(pureKey, fm, this::mergeMeta);
+            changed = true;
+        }
+
+        if (changed) {
+            files.clear();
+            files.putAll(normalized);
+            System.out.println("[NoteFileSync] 已规范化同步元数据 key (去除 --uuid)，条目数: " + files.size());
+        }
+        return changed;
+    }
+
+    /**
+     * 合并元数据时，选择较新的 cloudModified/lastModified，size 取较大
+     */
+    private SyncMetadata.FileMetadata mergeMeta(SyncMetadata.FileMetadata a, SyncMetadata.FileMetadata b) {
+        SyncMetadata.FileMetadata r = new SyncMetadata.FileMetadata();
+        r.path = a.path != null ? a.path : b.path;
+        r.lastModified = Math.max(a.lastModified, b.lastModified);
+        r.cloudModified = Math.max(a.cloudModified, b.cloudModified);
+        r.size = Math.max(a.size, b.size);
+        r.hash = (a.hash != null && !a.hash.isEmpty()) ? a.hash : b.hash;
+        return r;
     }
 
     public boolean isEnabled() {
