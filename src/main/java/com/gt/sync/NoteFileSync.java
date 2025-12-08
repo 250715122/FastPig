@@ -149,6 +149,11 @@ public class NoteFileSync {
             List<DownloadTask> toDownload = new ArrayList<>();
             AtomicInteger skippedCount = new AtomicInteger(0);
 
+            int totalFolders = (int) cloudFolders.stream().filter(f -> f.isDirectory() && !f.getName().startsWith(".")).count();
+            int checkCount = 0;
+            
+            System.out.println("[NoteFileSync] 开始检查 " + totalFolders + " 个文件夹...");
+
             for (CloudFileInfo cloudFolder : cloudFolders) {
                 if (!cloudFolder.isDirectory()) {
                     continue;
@@ -157,6 +162,12 @@ public class NoteFileSync {
                 String folderName = cloudFolder.getName();
                 if (folderName.startsWith(".")) {
                     continue;
+                }
+
+                checkCount++;
+                // 每检查 10 个文件夹输出一次进度
+                if (checkCount % 10 == 0 || checkCount == totalFolders) {
+                    System.out.println("[NoteFileSync] 检查进度: " + checkCount + "/" + totalFolders);
                 }
 
                 Path localFolder = notesDir.resolve(folderName);
