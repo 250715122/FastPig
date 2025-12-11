@@ -3,6 +3,8 @@ package com.gt.cloud;
 import com.github.sardine.DavResource;
 import com.github.sardine.Sardine;
 import com.github.sardine.SardineFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
@@ -20,6 +22,7 @@ import java.util.Properties;
  */
 public class NutstoreCloudProvider implements CloudStorageProvider {
 
+    private static final Logger logger = LoggerFactory.getLogger(NutstoreCloudProvider.class);
     private static NutstoreCloudProvider instance;
 
     private final boolean enabled;
@@ -62,11 +65,11 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
                 && password != null && !password.isEmpty());
 
         if (enabled) {
-            System.out.println("[NutstoreProvider] 坚果云已启用");
-            System.out.println("[NutstoreProvider] 用户名: " + username);
-            System.out.println("[NutstoreProvider] 同步路径: " + syncRootUrl);
+            logger.info("[NutstoreProvider] 坚果云已启用");
+            logger.info("[NutstoreProvider] 用户名: {}", username);
+            logger.info("[NutstoreProvider] 同步路径: {}", syncRootUrl);
         } else {
-            System.out.println("[NutstoreProvider] 坚果云未配置，请在 config.properties 中配置账号");
+            logger.warn("[NutstoreProvider] 坚果云未配置，请在 config.properties 中配置账号");
         }
     }
 
@@ -90,7 +93,7 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
                 props.load(input);
                 return props;
             } catch (Exception e) {
-                System.err.println("[NutstoreProvider] 读取配置文件失败: " + e.getMessage());
+                logger.error("[NutstoreProvider] 读取配置文件失败: {}", e.getMessage());
             }
         }
 
@@ -100,7 +103,7 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
                 props.load(input);
             }
         } catch (Exception e) {
-            System.err.println("[NutstoreProvider] 读取配置文件失败: " + e.getMessage());
+            logger.error("[NutstoreProvider] 读取配置文件失败: {}", e.getMessage());
         }
 
         return props;
@@ -144,12 +147,12 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
     @Override
     public boolean upload(String remotePath, byte[] data) {
         if (!enabled) {
-            System.out.println("[NutstoreProvider] 未启用，跳过上传");
+            logger.debug("[NutstoreProvider] 未启用，跳过上传");
             return false;
         }
 
         String fullUrl = buildFullUrl(remotePath);
-        System.out.println("[NutstoreProvider] 上传文件: " + fullUrl);
+        logger.info("[NutstoreProvider] 上传文件: {}", fullUrl);
 
         try {
             Sardine sardine = getSardine();
@@ -161,12 +164,11 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
             // 限流后上传文件
             throttle();
             sardine.put(fullUrl, data);
-            System.out.println("[NutstoreProvider] 上传成功: " + remotePath + " (" + data.length + " bytes)");
+            logger.info("[NutstoreProvider] 上传成功: {} ({} bytes)", remotePath, data.length);
             return true;
 
         } catch (Exception e) {
-            System.err.println("[NutstoreProvider] 上传失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("[NutstoreProvider] 上传失败: {}", e.getMessage(), e);
             return false;
         }
     }
@@ -174,12 +176,12 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
     @Override
     public byte[] download(String remotePath) {
         if (!enabled) {
-            System.out.println("[NutstoreProvider] 未启用，跳过下载");
+            logger.debug("[NutstoreProvider] 未启用，跳过下载");
             return null;
         }
 
         String fullUrl = buildFullUrl(remotePath);
-        System.out.println("[NutstoreProvider] 下载文件: " + fullUrl);
+        logger.info("[NutstoreProvider] 下载文件: {}", fullUrl);
 
         try {
             Sardine sardine = getSardine();
@@ -194,19 +196,19 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
                     out.write(buffer, 0, len);
                 }
                 byte[] data = out.toByteArray();
-                System.out.println("[NutstoreProvider] 下载成功: " + remotePath + " (" + data.length + " bytes)");
+                logger.info("[NutstoreProvider] 下载成功: {} ({} bytes)", remotePath, data.length);
                 return data;
             }
 
         } catch (com.github.sardine.impl.SardineException e) {
             if (e.getStatusCode() == 404) {
-                System.out.println("[NutstoreProvider] 文件不存在: " + remotePath);
+                logger.debug("[NutstoreProvider] 文件不存在: {}", remotePath);
             } else {
-                System.err.println("[NutstoreProvider] 下载失败: " + e.getMessage());
+                logger.error("[NutstoreProvider] 下载失败: {}", e.getMessage());
             }
             return null;
         } catch (Exception e) {
-            System.err.println("[NutstoreProvider] 下载失败: " + e.getMessage());
+            logger.error("[NutstoreProvider] 下载失败: {}", e.getMessage());
             return null;
         }
     }
@@ -218,24 +220,24 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
         }
 
         String fullUrl = buildFullUrl(remotePath);
-        System.out.println("[NutstoreProvider] 删除文件: " + fullUrl);
+        logger.info("[NutstoreProvider] 删除文件: {}", fullUrl);
 
         try {
             Sardine sardine = getSardine();
             throttle();
             // 直接尝试删除，不检查 exists（坚果云 HEAD 请求返回 403）
             sardine.delete(fullUrl);
-            System.out.println("[NutstoreProvider] 删除成功: " + remotePath);
+            logger.info("[NutstoreProvider] 删除成功: {}", remotePath);
             return true;
         } catch (com.github.sardine.impl.SardineException e) {
             if (e.getStatusCode() == 404) {
-                System.out.println("[NutstoreProvider] 文件不存在，无需删除: " + remotePath);
+                logger.debug("[NutstoreProvider] 文件不存在，无需删除: {}", remotePath);
                 return true;
             }
-            System.err.println("[NutstoreProvider] 删除失败: " + e.getMessage());
+            logger.error("[NutstoreProvider] 删除失败: {}", e.getMessage());
             return false;
         } catch (Exception e) {
-            System.err.println("[NutstoreProvider] 删除失败: " + e.getMessage());
+            logger.error("[NutstoreProvider] 删除失败: {}", e.getMessage());
             return false;
         }
     }
@@ -259,10 +261,10 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
             if (e.getStatusCode() == 404) {
                 return false;
             }
-            System.err.println("[NutstoreProvider] 检查存在失败: " + e.getMessage());
+            logger.error("[NutstoreProvider] 检查存在失败: {}", e.getMessage());
             return false;
         } catch (Exception e) {
-            System.err.println("[NutstoreProvider] 检查存在失败: " + e.getMessage());
+            logger.error("[NutstoreProvider] 检查存在失败: {}", e.getMessage());
             return false;
         }
     }
@@ -280,7 +282,7 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
             fullUrl += "/";
         }
 
-        System.out.println("[NutstoreProvider] 列出目录: " + fullUrl);
+        logger.debug("[NutstoreProvider] 列出目录: {}", fullUrl);
 
         try {
             Sardine sardine = getSardine();
@@ -301,17 +303,17 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
                 result.add(info);
             }
 
-            System.out.println("[NutstoreProvider] 找到 " + result.size() + " 个文件/目录");
+            logger.info("[NutstoreProvider] 找到 {} 个文件/目录", result.size());
 
         } catch (com.github.sardine.impl.SardineException e) {
             // 404 表示目录不存在，这是正常情况
             if (e.getStatusCode() == 404) {
-                System.out.println("[NutstoreProvider] 目录不存在: " + remoteDir);
+                logger.debug("[NutstoreProvider] 目录不存在: {}", remoteDir);
             } else {
-                System.err.println("[NutstoreProvider] 列出目录失败: " + e.getMessage());
+                logger.error("[NutstoreProvider] 列出目录失败: {}", e.getMessage());
             }
         } catch (Exception e) {
-            System.err.println("[NutstoreProvider] 列出目录失败: " + e.getMessage());
+            logger.error("[NutstoreProvider] 列出目录失败: {}", e.getMessage());
         }
 
         return result;
@@ -325,14 +327,14 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
             return result;
         }
 
-        System.out.println("[NutstoreProvider] 递归列出目录: " + remoteDir);
+        logger.debug("[NutstoreProvider] 递归列出目录: {}", remoteDir);
 
         try {
             // 使用手动递归方式，兼容不支持 infinity 深度的 WebDAV 服务器
             listFilesRecursiveInternal(remoteDir, result);
-            System.out.println("[NutstoreProvider] 递归找到 " + result.size() + " 个文件/目录");
+            logger.info("[NutstoreProvider] 递归找到 {} 个文件/目录", result.size());
         } catch (Exception e) {
-            System.err.println("[NutstoreProvider] 递归列出目录失败: " + e.getMessage());
+            logger.error("[NutstoreProvider] 递归列出目录失败: {}", e.getMessage());
         }
 
         return result;
@@ -368,14 +370,14 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
             fullUrl += "/";
         }
 
-        System.out.println("[NutstoreProvider] 创建目录: " + fullUrl);
+        logger.debug("[NutstoreProvider] 创建目录: {}", fullUrl);
 
         try {
             Sardine sardine = getSardine();
             ensureDirectoryExists(sardine, fullUrl);
             return true;
         } catch (Exception e) {
-            System.err.println("[NutstoreProvider] 创建目录失败: " + e.getMessage());
+            logger.error("[NutstoreProvider] 创建目录失败: {}", e.getMessage());
             return false;
         }
     }
@@ -410,7 +412,7 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
             throttle();
             sardine.createDirectory(url + "/");
             existingDirs.add(url);
-            System.out.println("[NutstoreProvider] 已创建目录: " + url);
+            logger.debug("[NutstoreProvider] 已创建目录: {}", url);
         } catch (Exception e) {
             // 目录可能已存在（405 或 already exists），加入缓存
             if (e.getMessage().contains("405") || e.getMessage().contains("already exists") 
@@ -418,19 +420,19 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
                 existingDirs.add(url);
             } else if (e.getMessage().contains("503")) {
                 // 限流错误，等待后重试
-                System.out.println("[NutstoreProvider] 触发限流，等待 " + (RETRY_WAIT_MS/1000) + " 秒后重试...");
+                logger.warn("[NutstoreProvider] 触发限流，等待 {} 秒后重试...", (RETRY_WAIT_MS/1000));
                 Thread.sleep(RETRY_WAIT_MS);
                 throttle();
                 try {
                     sardine.createDirectory(url + "/");
                     existingDirs.add(url);
-                    System.out.println("[NutstoreProvider] 已创建目录: " + url);
+                    logger.debug("[NutstoreProvider] 已创建目录: {}", url);
                 } catch (Exception e2) {
                     // 重试后仍然失败，可能目录已存在
                     if (e2.getMessage().contains("405") || e2.getMessage().contains("301")) {
                         existingDirs.add(url);
                     } else {
-                        System.err.println("[NutstoreProvider] 创建目录失败: " + e2.getMessage());
+                        logger.error("[NutstoreProvider] 创建目录失败: {}", e2.getMessage());
                     }
                 }
             } else {
@@ -478,10 +480,10 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
             if (e.getStatusCode() == 404) {
                 return null; // 文件不存在
             }
-            System.err.println("[NutstoreProvider] 获取文件信息失败: " + e.getMessage());
+            logger.error("[NutstoreProvider] 获取文件信息失败: {}", e.getMessage());
             return null;
         } catch (Exception e) {
-            System.err.println("[NutstoreProvider] 获取文件信息失败: " + e.getMessage());
+            logger.error("[NutstoreProvider] 获取文件信息失败: {}", e.getMessage());
             return null;
         }
     }

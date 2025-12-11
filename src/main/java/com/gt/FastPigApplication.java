@@ -50,8 +50,6 @@ public class FastPigApplication extends JFrame {
         logger.info("工作目录: {}", System.getProperty("user.dir"));
         logger.info("========================================");
         
-        System.out.println("启动 FastPig 应用程序...");
-        
         // 初始化存储
         NoteRepository repo = new NoteRepository(System.getProperty("user.dir") + "/fastpig.db");
         com.gt.storage.NoteFileStorage fileStorage = com.gt.storage.NoteFileStorage.getInstance();
@@ -78,7 +76,7 @@ public class FastPigApplication extends JFrame {
             try {
                 DbSyncService.getInstance().syncFromCloudOnStart();
             } catch (Exception e) {
-                System.err.println("[FastPigApplication] 后台同步失败: " + e.getMessage());
+                logger.error("[FastPigApplication] 后台同步失败: {}", e.getMessage(), e);
             }
         }, "CloudSync-Thread").start();
         // 同时初始化热键（Alt+S 可再次呼出界面）
@@ -152,7 +150,7 @@ public class FastPigApplication extends JFrame {
             ArrayList<String> items = SnippetSearchUtil.searchHelper("");
             setupAutoComplete(textArea, items);
         } catch (IOException e) {
-            System.err.println("初始化自动补全失败: " + e.getMessage());
+            logger.error("初始化自动补全失败: {}", e.getMessage());
         }
         
         textArea.setEditable(true);
@@ -329,7 +327,7 @@ public class FastPigApplication extends JFrame {
                     }
 
                 } catch (Exception ex) {
-                    System.err.println("自动补全更新失败: " + ex.getMessage());
+                    logger.error("自动补全更新失败: {}", ex.getMessage());
                     popup.setVisible(false);
                 }
             }

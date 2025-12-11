@@ -3,6 +3,8 @@ package com.gt.service;
 import com.gt.NoteDto;
 import com.gt.NoteRepository;
 import com.gt.storage.NoteFileStorage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -20,6 +22,7 @@ import java.util.List;
  */
 public class NoteService {
 
+    private static final Logger logger = LoggerFactory.getLogger(NoteService.class);
     private static NoteService instance;
 
     private final NoteRepository repository;
@@ -59,7 +62,7 @@ public class NoteService {
         // 更新索引（不存储正文，只存储元数据）
         repository.saveIndex(note);
 
-        System.out.println("[NoteService] 已保存笔记: " + note.key + " (id=" + note.id + ")");
+        logger.info("[NoteService] 已保存笔记: " + note.key + " (id=" + note.id + ")");
     }
 
     /**
@@ -141,7 +144,7 @@ public class NoteService {
             fileStorage.saveToFile(note);
         }
 
-        System.out.println("[NoteService] 已删除笔记: " + id);
+        logger.info("[NoteService] 已删除笔记: " + id);
     }
 
     /**
@@ -162,7 +165,7 @@ public class NoteService {
             }
         }
 
-        System.out.println("[NoteService] 已恢复笔记: " + key);
+        logger.info("[NoteService] 已恢复笔记: " + key);
     }
 
     /**
@@ -177,7 +180,7 @@ public class NoteService {
      * 扫描 notes 目录，更新 SQLite 索引
      */
     public int rebuildIndexFromFiles() {
-        System.out.println("[NoteService] 开始从文件重建索引...");
+        logger.info("[NoteService] 开始从文件重建索引...");
         
         List<NoteDto> notes = fileStorage.scanAllNotes();
         int count = 0;
@@ -189,11 +192,11 @@ public class NoteService {
                 repository.saveIndex(note);
                 count++;
             } catch (Exception e) {
-                System.err.println("[NoteService] 索引笔记失败: " + note.id + " - " + e.getMessage());
+                logger.error("[NoteService] 索引笔记失败: " + note.id + " - " + e.getMessage());
             }
         }
 
-        System.out.println("[NoteService] 索引重建完成，共 " + count + " 个笔记");
+        logger.info("[NoteService] 索引重建完成，共 " + count + " 个笔记");
         return count;
     }
 

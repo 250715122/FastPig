@@ -1,6 +1,8 @@
 package com.gt.storage;
 
 import com.gt.NoteDto;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -25,6 +27,7 @@ import java.util.regex.Pattern;
  */
 public class NoteFileStorage {
 
+    private static final Logger logger = LoggerFactory.getLogger(NoteFileStorage.class);
     private static NoteFileStorage instance;
 
     private final Path notesDir;
@@ -60,7 +63,7 @@ public class NoteFileStorage {
         try {
             if (!Files.exists(notesDir)) {
                 Files.createDirectories(notesDir);
-                System.out.println("[NoteFileStorage] 创建 notes 目录: " + notesDir);
+                logger.info("[NoteFileStorage] 创建 notes 目录: " + notesDir);
             }
         } catch (IOException e) {
             throw new RuntimeException("无法创建 notes 目录: " + e.getMessage(), e);
@@ -120,7 +123,7 @@ public class NoteFileStorage {
             // 写入文件
             Files.writeString(noteFilePath, content, StandardCharsets.UTF_8);
 
-            System.out.println("[NoteFileStorage] 已保存笔记: " + noteFilePath);
+            logger.info("[NoteFileStorage] 已保存笔记: " + noteFilePath);
 
             // 清理未引用的图片资源
             cleanupUnusedAssets(note, folderPath);
@@ -159,14 +162,14 @@ public class NoteFileStorage {
                         String fileName = file.getFileName().toString();
                         if (!referencedFiles.contains(fileName)) {
                             Files.delete(file);
-                            System.out.println("[NoteFileStorage] 已清理未引用图片: " + fileName);
+                            logger.info("[NoteFileStorage] 已清理未引用图片: " + fileName);
                         }
                     }
                 }
             }
             
         } catch (IOException e) {
-            System.err.println("[NoteFileStorage] 清理未引用图片失败: " + e.getMessage());
+                    logger.error("[NoteFileStorage] 清理未引用图片失败: " + e.getMessage());
         }
     }
 
@@ -177,7 +180,7 @@ public class NoteFileStorage {
         Path noteFilePath = folderPath.resolve(NOTE_FILE_NAME);
 
         if (!Files.exists(noteFilePath)) {
-            System.out.println("[NoteFileStorage] 笔记文件不存在: " + noteFilePath);
+            logger.info("[NoteFileStorage] 笔记文件不存在: " + noteFilePath);
             return null;
         }
 
@@ -185,7 +188,7 @@ public class NoteFileStorage {
             String content = Files.readString(noteFilePath, StandardCharsets.UTF_8);
             return parseNoteContent(content, folderPath);
         } catch (IOException e) {
-            System.err.println("[NoteFileStorage] 读取笔记失败: " + e.getMessage());
+                    logger.error("[NoteFileStorage] 读取笔记失败: " + e.getMessage());
             return null;
         }
     }
@@ -216,7 +219,7 @@ public class NoteFileStorage {
                 }
             }
         } catch (IOException e) {
-            System.err.println("[NoteFileStorage] 查找笔记文件失败: " + e.getMessage());
+                    logger.error("[NoteFileStorage] 查找笔记文件失败: " + e.getMessage());
         }
         return null;
     }
@@ -237,10 +240,10 @@ public class NoteFileStorage {
                 }
             }
         } catch (IOException e) {
-            System.err.println("[NoteFileStorage] 扫描笔记目录失败: " + e.getMessage());
+                    logger.error("[NoteFileStorage] 扫描笔记目录失败: " + e.getMessage());
         }
 
-        System.out.println("[NoteFileStorage] 扫描到 " + notes.size() + " 个笔记");
+        logger.info("[NoteFileStorage] 扫描到 " + notes.size() + " 个笔记");
         return notes;
     }
 
@@ -255,10 +258,10 @@ public class NoteFileStorage {
 
         try {
             deleteDirectory(folderPath);
-            System.out.println("[NoteFileStorage] 已删除笔记文件夹: " + folderPath);
+            logger.info("[NoteFileStorage] 已删除笔记文件夹: " + folderPath);
             return true;
         } catch (IOException e) {
-            System.err.println("[NoteFileStorage] 删除笔记文件夹失败: " + e.getMessage());
+                    logger.error("[NoteFileStorage] 删除笔记文件夹失败: " + e.getMessage());
             return false;
         }
     }
@@ -274,7 +277,7 @@ public class NoteFileStorage {
                         try {
                             Files.delete(path);
                         } catch (IOException e) {
-                            System.err.println("删除失败: " + path);
+                            logger.error("删除失败: {}", path);
                         }
                     });
         }
@@ -303,7 +306,7 @@ public class NoteFileStorage {
             Path assetPath = assetsDir.resolve(fileName);
             Files.write(assetPath, data);
 
-            System.out.println("[NoteFileStorage] 已保存资源: " + assetPath);
+            logger.info("[NoteFileStorage] 已保存资源: " + assetPath);
             return assetPath;
 
         } catch (IOException e) {
@@ -535,7 +538,7 @@ public class NoteFileStorage {
      */
     public void renameNoteFolder(String noteId, String oldKey, String newKey) {
         // 当前策略：key 不支持修改，故不执行重命名
-        System.out.println("[NoteFileStorage] 跳过重命名（当前不支持修改 key）: " + oldKey + " -> " + newKey);
+        logger.info("[NoteFileStorage] 跳过重命名（当前不支持修改 key）: " + oldKey + " -> " + newKey);
     }
 }
 

@@ -1,5 +1,8 @@
 package com.gt.sync;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
@@ -11,7 +14,8 @@ import java.util.*;
  */
 public class SyncMetadata {
 
-    private static final String META_FILE_NAME = ".sync_meta.json";
+    private static final Logger logger = LoggerFactory.getLogger(SyncMetadata.class);
+    public static final String META_FILE_NAME = ".sync_meta.json";
 
     private long lastSyncTime;
     private Map<String, FileMetadata> files;
@@ -35,7 +39,7 @@ public class SyncMetadata {
             String content = Files.readString(metaFile, StandardCharsets.UTF_8);
             return parse(content);
         } catch (Exception e) {
-            System.err.println("[SyncMetadata] 加载失败: " + e.getMessage());
+            logger.error("[SyncMetadata] 加载失败: " + e.getMessage());
             return new SyncMetadata();
         }
     }
@@ -57,7 +61,7 @@ public class SyncMetadata {
             String content = serialize();
             Files.writeString(metaFile, content, StandardCharsets.UTF_8);
         } catch (IOException e) {
-            System.err.println("[SyncMetadata] 保存失败: " + e.getMessage());
+            logger.error("[SyncMetadata] 保存失败: " + e.getMessage());
         }
     }
 
@@ -295,7 +299,7 @@ public class SyncMetadata {
         try {
             return parse(json);
         } catch (Exception e) {
-            System.err.println("[SyncMetadata] 解析云端 meta 失败: " + e.getMessage());
+            logger.error("[SyncMetadata] 解析云端 meta 失败: " + e.getMessage());
             return null;
         }
     }

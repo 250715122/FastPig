@@ -6,6 +6,8 @@ import com.gt.cloud.CloudStorageFactory;
 import com.gt.cloud.CloudStorageProvider;
 import com.gt.service.NoteService;
 import com.gt.storage.NoteFileStorage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -27,6 +29,7 @@ import java.util.stream.Stream;
  */
 public class NoteFileSync {
 
+    private static final Logger logger = LoggerFactory.getLogger(NoteFileSync.class);
     private static NoteFileSync instance;
 
     private final NoteFileStorage fileStorage;
@@ -54,11 +57,11 @@ public class NoteFileSync {
      */
     public boolean syncToCloud() {
         if (!cloudProvider.isEnabled()) {
-            System.out.println("[NoteFileSync] 云存储未启用，跳过上传");
+            logger.info("[NoteFileSync] 云存储未启用，跳过上传");
             return false;
         }
 
-        System.out.println("[NoteFileSync] 开始上传同步到云端...");
+        logger.info("[NoteFileSync] 开始上传同步到云端...");
         long startTime = System.currentTimeMillis();
 
         try {
@@ -67,7 +70,7 @@ public class NoteFileSync {
             normalizeSyncMeta(syncMeta);
             long lastSyncTime = syncMeta.getLastSyncTime();
 
-            System.out.println("[NoteFileSync] 上次同步时间: " + new Date(lastSyncTime));
+            logger.info("[NoteFileSync] 上次同步时间: " + new Date(lastSyncTime));
 
             // 确保云端根目录存在
             cloudProvider.createDirectory("");
@@ -92,12 +95,12 @@ public class NoteFileSync {
             }
 
             int total = toUpload.size();
-            System.out.println("[NoteFileSync] 需要上传: " + total + " 个, 跳过: " + skippedCount + " 个");
+            logger.info("[NoteFileSync] 需要上传: " + total + " 个, 跳过: " + skippedCount + " 个");
 
             // 上传文件（带进度显示）
             for (int i = 0; i < toUpload.size(); i++) {
                 Path folderPath = toUpload.get(i);
-                System.out.println("[NoteFileSync] 上传进度: " + (i + 1) + "/" + total);
+                logger.info("[NoteFileSync] 上传进度: " + (i + 1) + "/" + total);
                 
                 if (uploadNoteFolder(folderPath)) {
                     uploadedCount++;
@@ -115,12 +118,12 @@ public class NoteFileSync {
             uploadSyncMetaToCloud(syncMeta);
 
             long elapsed = System.currentTimeMillis() - startTime;
-            System.out.println("[NoteFileSync] 上传同步完成: 成功 " + uploadedCount + " 个, 失败 " + failedCount + " 个, 跳过 " + skippedCount + " 个, 耗时 " + elapsed + "ms");
+            logger.info("[NoteFileSync] 上传同步完成: 成功 " + uploadedCount + " 个, 失败 " + failedCount + " 个, 跳过 " + skippedCount + " 个, 耗时 " + elapsed + "ms");
 
             return true;
 
         } catch (Exception e) {
-            System.err.println("[NoteFileSync] 上传同步失败: " + e.getMessage());
+            logger.error("[NoteFileSync] 上传同步失败: " + e.getMessage());
             e.printStackTrace();
             return false;
         }
@@ -133,11 +136,11 @@ public class NoteFileSync {
      */
     public boolean syncFromCloud() {
         if (!cloudProvider.isEnabled()) {
-            System.out.println("[NoteFileSync] 云存储未启用，跳过下载");
+            logger.info("[NoteFileSync] 云存储未启用，跳过下载");
             return false;
         }
 
-        System.out.println("[NoteFileSync] 开始从云端下载同步...");
+        logger.info("[NoteFileSync] 开始从云端下载同步...");
         long startTime = System.currentTimeMillis();
 
         try {
@@ -151,7 +154,7 @@ public class NoteFileSync {
 
             // 获取云端文件夹列表
             List<CloudFileInfo> cloudFolders = cloudProvider.listFiles("");
-            System.out.println("[NoteFileSync] 云端笔记文件夹: " + cloudFolders.size() + " 个");
+            logger.info("[NoteFileSync] 云端笔记文件夹: " + cloudFolders.size() + " 个");
 
             // 先筛选出需要下载的文件夹
             List<DownloadTask> toDownload = new ArrayList<>();
@@ -161,9 +164,9 @@ public class NoteFileSync {
             int checkCount = 0;
             
             if (useVersionCompare) {
-                System.out.println("[NoteFileSync] 使用版本号快速比较模式...");
+                logger.info("[NoteFileSync] 使用版本号快速比较模式...");
             } else {
-                System.out.println("[NoteFileSync] 开始检查 " + totalFolders + " 个文件夹...");
+                logger.info("[NoteFileSync] 开始检查 " + totalFolders + " 个文件夹...");
             }
 
             for (CloudFileInfo cloudFolder : cloudFolders) {
@@ -186,7 +189,7 @@ public class NoteFileSync {
                 } else {
                     // 传统模式：逐个检查（慢）
                     if (checkCount % 10 == 0 || checkCount == totalFolders) {
-                        System.out.println("[NoteFileSync] 检查进度: " + checkCount + "/" + totalFolders);
+                        logger.info("[NoteFileSync] 检查进度: " + checkCount + "/" + totalFolders);
                     }
                     needDownload = shouldDownload(cloudFolder, localFolder, localMeta);
                 }
@@ -199,7 +202,7 @@ public class NoteFileSync {
             }
 
             int totalToDownload = toDownload.size();
-            System.out.println("[NoteFileSync] 需要下载: " + totalToDownload + " 个, 跳过: " + skippedCount.get() + " 个");
+            logger.info("[NoteFileSync] 需要下载: " + totalToDownload + " 个, 跳过: " + skippedCount.get() + " 个");
 
             AtomicInteger downloadedCount = new AtomicInteger(0);
             AtomicInteger failedCount = new AtomicInteger(0);
@@ -214,7 +217,7 @@ public class NoteFileSync {
                 // 用于线程安全地更新同步元数据
                 List<DownloadTask> completedTasks = Collections.synchronizedList(new ArrayList<>());
 
-                System.out.println("[NoteFileSync] 启动 " + threadCount + " 线程并发下载...");
+                logger.info("[NoteFileSync] 启动 " + threadCount + " 线程并发下载...");
 
                 // 提交所有任务到线程池，每提交一个间隔 0.3 秒
                 for (int i = 0; i < toDownload.size(); i++) {
@@ -222,7 +225,7 @@ public class NoteFileSync {
 
                     futures.add(executor.submit(() -> {
                         int current = progressCount.incrementAndGet();
-                        System.out.println("[NoteFileSync] 下载进度: " + current + "/" + totalToDownload + " - " + task.folderName);
+                        logger.info("[NoteFileSync] 下载进度: " + current + "/" + totalToDownload + " - " + task.folderName);
                         
                         boolean success = downloadNoteFolder(task.folderName, task.localFolder);
                         if (success) {
@@ -244,7 +247,7 @@ public class NoteFileSync {
                 executor.shutdown();
                 boolean finished = executor.awaitTermination(60, TimeUnit.MINUTES);
                 if (!finished) {
-                    System.err.println("[NoteFileSync] 下载超时，强制终止");
+                    logger.error("[NoteFileSync] 下载超时，强制终止");
                     executor.shutdownNow();
                 }
 
@@ -256,7 +259,7 @@ public class NoteFileSync {
 
             // 重建索引
             if (downloadedCount.get() > 0 && noteService != null) {
-                System.out.println("[NoteFileSync] 重建索引...");
+                logger.info("[NoteFileSync] 重建索引...");
                 noteService.rebuildIndexFromFiles();
             }
 
@@ -270,12 +273,12 @@ public class NoteFileSync {
             }
 
             long elapsed = System.currentTimeMillis() - startTime;
-            System.out.println("[NoteFileSync] 下载同步完成: 成功 " + downloadedCount.get() + " 个, 失败 " + failedCount.get() + " 个, 跳过 " + skippedCount.get() + " 个, 耗时 " + elapsed + "ms");
+            logger.info("[NoteFileSync] 下载同步完成: 成功 " + downloadedCount.get() + " 个, 失败 " + failedCount.get() + " 个, 跳过 " + skippedCount.get() + " 个, 耗时 " + elapsed + "ms");
 
             return true;
 
         } catch (Exception e) {
-            System.err.println("[NoteFileSync] 下载同步失败: " + e.getMessage());
+            logger.error("[NoteFileSync] 下载同步失败: " + e.getMessage());
             e.printStackTrace();
             return false;
         }
@@ -305,7 +308,7 @@ public class NoteFileSync {
             return;
         }
 
-        System.out.println("[NoteFileSync] 启动时同步检查...");
+        logger.info("[NoteFileSync] 启动时同步检查...");
 
         try {
             // 检查云端是否有数据
@@ -323,7 +326,7 @@ public class NoteFileSync {
                 }
             }
 
-            System.out.println("[NoteFileSync] 本地: " + localCount + " 个, 云端: " + cloudCount + " 个");
+            logger.info("[NoteFileSync] 本地: " + localCount + " 个, 云端: " + cloudCount + " 个");
 
             if (cloudCount > 0) {
                 // 云端有数据，下载同步
@@ -331,13 +334,13 @@ public class NoteFileSync {
             } else if (localCount > 0 && cloudCount == 0) {
                 // 本地有数据但云端为空（首次迁移场景）
                 // 不自动上传，提示用户手动同步
-                System.out.println("[NoteFileSync] ⚠️ 检测到首次迁移场景（本地 " + localCount + " 个，云端 0 个）");
-                System.out.println("[NoteFileSync] ⚠️ 为避免触发云端限流，请手动按 Alt+S 上传");
-                System.out.println("[NoteFileSync] ⚠️ 上传过程中请耐心等待，每个文件间隔 200ms");
+                logger.info("[NoteFileSync] ⚠️ 检测到首次迁移场景（本地 " + localCount + " 个，云端 0 个）");
+                logger.info("[NoteFileSync] ⚠️ 为避免触发云端限流，请手动按 Alt+S 上传");
+                logger.info("[NoteFileSync] ⚠️ 上传过程中请耐心等待，每个文件间隔 200ms");
             }
 
         } catch (Exception e) {
-            System.err.println("[NoteFileSync] 启动同步失败: " + e.getMessage());
+            logger.error("[NoteFileSync] 启动同步失败: " + e.getMessage());
         }
     }
 
@@ -363,7 +366,7 @@ public class NoteFileSync {
 
             if (fm == null) {
                 // 没有记录，说明是新文件，需要上传
-                System.out.println("[NoteFileSync] 新笔记需要上传: " + relativePath);
+                logger.info("[NoteFileSync] 新笔记需要上传: " + relativePath);
                 return true;
             }
 
@@ -381,7 +384,7 @@ public class NoteFileSync {
             // 比较文件修改时间和大小与 SyncMetadata 中记录的值
             // 只有当修改时间或大小变化时才需要上传
             if (fileModified != fm.lastModified || fileSize != fm.size) {
-                System.out.println("[NoteFileSync] 文件已修改: " + relativePath + 
+                logger.info("[NoteFileSync] 文件已修改: " + relativePath + 
                     " (时间: " + fm.lastModified + " -> " + fileModified + 
                     ", 大小: " + fm.size + " -> " + fileSize + ")");
                 return true;
@@ -396,7 +399,7 @@ public class NoteFileSync {
                             long assetModified = Files.getLastModifiedTime(assetFile).toMillis();
                             // 如果资源文件修改时间晚于上次记录的同步时间，需要上传
                             if (assetModified > fm.lastModified) {
-                                System.out.println("[NoteFileSync] 资源文件有更新: " + assetFile.getFileName());
+                                logger.info("[NoteFileSync] 资源文件有更新: " + assetFile.getFileName());
                                 return true;
                             }
                         }
@@ -420,7 +423,7 @@ public class NoteFileSync {
         
         // 本地不存在，需要下载
         if (!Files.exists(localFolder)) {
-            System.out.println("[NoteFileSync] 新笔记（本地不存在）: " + folderName);
+            logger.info("[NoteFileSync] 新笔记（本地不存在）: " + folderName);
             return true;
         }
 
@@ -448,7 +451,7 @@ public class NoteFileSync {
 
         // 比较版本号
         if (cloudVersion > localVersion) {
-            System.out.println("[NoteFileSync] 云端版本更高: " + folderName + 
+            logger.info("[NoteFileSync] 云端版本更高: " + folderName + 
                 " (本地 v" + localVersion + " < 云端 v" + cloudVersion + ")");
             return true;
         }
@@ -464,14 +467,14 @@ public class NoteFileSync {
         
         // 本地不存在，需要下载
         if (!Files.exists(localFolder)) {
-            System.out.println("[NoteFileSync] 新笔记（本地不存在）: " + folderName);
+            logger.info("[NoteFileSync] 新笔记（本地不存在）: " + folderName);
             return true;
         }
 
         try {
             Path localNoteFile = localFolder.resolve("note.md");
             if (!Files.exists(localNoteFile)) {
-                System.out.println("[NoteFileSync] 新笔记（note.md不存在）: " + folderName);
+                logger.info("[NoteFileSync] 新笔记（note.md不存在）: " + folderName);
                 return true;
             }
 
@@ -494,7 +497,7 @@ public class NoteFileSync {
             if (fm == null) {
                 // 首次：仅当大小不同才下载；mtime 不作为判定依据
                 if (cloudSize > 0 && cloudSize != localSize) {
-                    System.out.println("[NoteFileSync] 首次记录且大小不同，需下载: " + folderName);
+                    logger.info("[NoteFileSync] 首次记录且大小不同，需下载: " + folderName);
                     return true;
                 }
                 // 记录并跳过
@@ -517,7 +520,7 @@ public class NoteFileSync {
             }
 
             // 云端大小变了，需要版本判定
-            System.out.println("[NoteFileSync] 同步版本判定: " + folderName + " (云端 size: " + cloudSize + ", 记录 size: " + fm.size + ")");
+            logger.info("[NoteFileSync] 同步版本判定: " + folderName + " (云端 size: " + cloudSize + ", 记录 size: " + fm.size + ")");
             return resolveConflictIfNeeded(localFolder, folderName);
 
         } catch (Exception e) {
@@ -550,15 +553,15 @@ public class NoteFileSync {
 
             // 版本号高的胜出
             if (cloudVersion > localNote.version) {
-                System.out.println("[NoteFileSync] 云端版本更高: " + cloudFolderName + " (本地 v" + localNote.version + " < 云端 v" + cloudVersion + ")");
+                logger.info("[NoteFileSync] 云端版本更高: " + cloudFolderName + " (本地 v" + localNote.version + " < 云端 v" + cloudVersion + ")");
                 return true; // 下载云端版本
             } else if (cloudVersion < localNote.version) {
-                System.out.println("[NoteFileSync] 本地版本更高: " + cloudFolderName + " (本地 v" + localNote.version + " > 云端 v" + cloudVersion + ")");
+                logger.info("[NoteFileSync] 本地版本更高: " + cloudFolderName + " (本地 v" + localNote.version + " > 云端 v" + cloudVersion + ")");
                 return false; // 保持本地版本
             } else {
                 // 版本相同，比较更新时间
                 if (cloudUpdatedAt > localNote.updatedAt) {
-                    System.out.println("[NoteFileSync] 版本相同但云端更新: " + cloudFolderName);
+                    logger.info("[NoteFileSync] 版本相同但云端更新: " + cloudFolderName);
                     return true;
                 }
                 // 版本相同且本地更新或相同，跳过下载
@@ -566,7 +569,7 @@ public class NoteFileSync {
             }
 
         } catch (Exception e) {
-            System.err.println("[NoteFileSync] 冲突检测失败: " + e.getMessage());
+            logger.error("[NoteFileSync] 冲突检测失败: " + e.getMessage());
             return true; // 出错时下载云端版本
         }
     }
@@ -608,7 +611,7 @@ public class NoteFileSync {
      */
     private boolean uploadNoteFolder(Path folderPath) {
         String folderName = folderPath.getFileName().toString();
-        System.out.println("[NoteFileSync] 上传文件夹: " + folderName);
+        logger.info("[NoteFileSync] 上传文件夹: " + folderName);
 
         try {
             // 确保云端目录存在
@@ -624,7 +627,7 @@ public class NoteFileSync {
 
                     byte[] data = Files.readAllBytes(file);
                     if (!cloudProvider.upload(remotePath, data)) {
-                        System.err.println("[NoteFileSync] 上传失败: " + remotePath);
+                        logger.error("[NoteFileSync] 上传失败: " + remotePath);
                         return false;
                     }
                 }
@@ -633,7 +636,7 @@ public class NoteFileSync {
             return true;
 
         } catch (IOException e) {
-            System.err.println("[NoteFileSync] 上传文件夹失败: " + e.getMessage());
+            logger.error("[NoteFileSync] 上传文件夹失败: " + e.getMessage());
             return false;
         }
     }
@@ -642,7 +645,7 @@ public class NoteFileSync {
      * 下载笔记文件夹（旧方法，保留兼容）
      */
     private boolean downloadNoteFolder(String folderName, Path localFolder) {
-        System.out.println("[NoteFileSync] 下载文件夹: " + folderName);
+        logger.info("[NoteFileSync] 下载文件夹: " + folderName);
 
         try {
             // 确保本地目录存在
@@ -679,7 +682,7 @@ public class NoteFileSync {
             return true;
 
         } catch (IOException e) {
-            System.err.println("[NoteFileSync] 下载文件夹失败: " + e.getMessage());
+            logger.error("[NoteFileSync] 下载文件夹失败: " + e.getMessage());
             return false;
         }
     }
@@ -697,7 +700,7 @@ public class NoteFileSync {
                 Files.createDirectories(parent);
             }
             Files.write(localPath, data);
-            System.out.println("[NoteFileSync] 已下载: " + localPath.getFileName());
+            logger.info("[NoteFileSync] 已下载: " + localPath.getFileName());
         }
     }
 
@@ -760,11 +763,11 @@ public class NoteFileSync {
                 fm.version = version;
                 fm.cloudModified = localModified; // 下载后本地时间即为云端时间
 
-                System.out.println("[NoteFileSync] 已记录同步信息: " + folderName + 
+                logger.info("[NoteFileSync] 已记录同步信息: " + folderName + 
                     " (大小: " + localSize + ", 版本: v" + version + ")");
             }
         } catch (IOException e) {
-            System.err.println("[NoteFileSync] 更新元数据失败: " + folderName + " - " + e.getMessage());
+            logger.error("[NoteFileSync] 更新元数据失败: " + folderName + " - " + e.getMessage());
         }
     }
 
@@ -776,10 +779,10 @@ public class NoteFileSync {
             String json = syncMeta.toJson();
             byte[] data = json.getBytes(StandardCharsets.UTF_8);
             if (cloudProvider.upload(".sync_meta.json", data)) {
-                System.out.println("[NoteFileSync] 已上传 .sync_meta.json 到云端 (" + data.length + " bytes)");
+                logger.info("[NoteFileSync] 已上传 .sync_meta.json 到云端 (" + data.length + " bytes)");
             }
         } catch (Exception e) {
-            System.err.println("[NoteFileSync] 上传 .sync_meta.json 失败: " + e.getMessage());
+            logger.error("[NoteFileSync] 上传 .sync_meta.json 失败: " + e.getMessage());
         }
     }
 
@@ -791,17 +794,17 @@ public class NoteFileSync {
         try {
             byte[] data = cloudProvider.download(".sync_meta.json");
             if (data == null || data.length == 0) {
-                System.out.println("[NoteFileSync] 云端没有 .sync_meta.json，将使用传统方式检查");
+                logger.info("[NoteFileSync] 云端没有 .sync_meta.json，将使用传统方式检查");
                 return null;
             }
             String json = new String(data, StandardCharsets.UTF_8);
             SyncMetadata cloudMeta = SyncMetadata.parseFromJson(json);
             if (cloudMeta != null) {
-                System.out.println("[NoteFileSync] 已下载云端 .sync_meta.json (" + data.length + " bytes, " + cloudMeta.getFiles().size() + " 个文件记录)");
+                logger.info("[NoteFileSync] 已下载云端 .sync_meta.json (" + data.length + " bytes, " + cloudMeta.getFiles().size() + " 个文件记录)");
             }
             return cloudMeta;
         } catch (Exception e) {
-            System.err.println("[NoteFileSync] 下载云端 .sync_meta.json 失败: " + e.getMessage());
+            logger.error("[NoteFileSync] 下载云端 .sync_meta.json 失败: " + e.getMessage());
             return null;
         }
     }
@@ -833,7 +836,7 @@ public class NoteFileSync {
         if (changed) {
             files.clear();
             files.putAll(normalized);
-            System.out.println("[NoteFileSync] 已规范化同步元数据 key (去除 --uuid)，条目数: " + files.size());
+            logger.info("[NoteFileSync] 已规范化同步元数据 key (去除 --uuid)，条目数: " + files.size());
         }
         return changed;
     }

@@ -295,6 +295,14 @@ public class UnifiedNoteAppFrame extends JFrame {
                 }
             }
             
+            @Override public void keyPressed(java.awt.event.KeyEvent e) {
+                // 拦截 Alt + T（不区分左右 Alt）
+                if (e.getKeyCode() == java.awt.event.KeyEvent.VK_T && e.isAltDown() && !e.isControlDown() && !e.isShiftDown()) {
+                    toggleTocPanel();
+                    e.consume(); // 阻止事件继续传播
+                }
+            }
+            
             @Override public void keyReleased(java.awt.event.KeyEvent e){
                 int code = e.getKeyCode();
                 if (code==java.awt.event.KeyEvent.VK_DOWN){
@@ -355,8 +363,9 @@ public class UnifiedNoteAppFrame extends JFrame {
         });
         bodyArea.setLineWrap(true);
         
-        // 设置图片粘贴处理器
-        setupImagePasteHandler();
+        // 图片粘贴功能已整合到 installPasteHandlers() → doPasteWithChoice() → tryPasteImage()
+        // 注释掉此行避免 TransferHandler 冲突导致复制功能失效
+        // setupImagePasteHandler();
         
         bodyScrollPane = new JScrollPane(bodyArea);
         
@@ -578,6 +587,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         bodyArea.getActionMap().put("listNewline", new AbstractAction(){
             @Override public void actionPerformed(ActionEvent e){ continueListWithEnter(); }
         });
+        
         // Ctrl+B 加粗
         KeyStroke ksBold = KeyStroke.getKeyStroke('B', java.awt.event.InputEvent.CTRL_DOWN_MASK);
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksBold, "boldSelection");
@@ -883,6 +893,9 @@ public class UnifiedNoteAppFrame extends JFrame {
                 String msg = tocVisible ? "目录已显示" : "目录已隐藏";
                 showPreviewBadge(msg);
                 System.out.println("[TOC] " + msg);
+                
+                // 焦点返回到编辑区
+                SwingUtilities.invokeLater(() -> bodyArea.requestFocusInWindow());
             } catch (Exception e) {
                 System.err.println("[TOC] 切换目录失败: " + e.getMessage());
             }
@@ -934,6 +947,9 @@ public class UnifiedNoteAppFrame extends JFrame {
                 String msg = tocVisibleInEditMode ? "目录已显示" : "目录已隐藏";
                 showPreviewBadge(msg);
                 System.out.println("[TOC] 编辑模式 - " + msg);
+                
+                // 焦点返回到编辑区
+                SwingUtilities.invokeLater(() -> bodyArea.requestFocusInWindow());
             } catch (Exception e) {
                 System.err.println("[TOC] 编辑模式切换目录失败: " + e.getMessage());
                 e.printStackTrace();
@@ -1169,6 +1185,9 @@ public class UnifiedNoteAppFrame extends JFrame {
                 public void removeUpdate(javax.swing.event.DocumentEvent e) { previewTimer.restart(); }
                 public void changedUpdate(javax.swing.event.DocumentEvent e) { previewTimer.restart(); }
             });
+            
+            // 焦点返回到编辑区
+            SwingUtilities.invokeLater(() -> bodyArea.requestFocusInWindow());
         } else {
             // 关闭预览，恢复原布局
             getContentPane().remove(centerComponent);
@@ -1188,6 +1207,9 @@ public class UnifiedNoteAppFrame extends JFrame {
             previewVisible = false;
             previewFullscreen = false; // 重置全屏状态
             tocVisible = false; // 重置目录可见状态为默认值（隐藏）
+            
+            // 焦点返回到编辑区
+            SwingUtilities.invokeLater(() -> bodyArea.requestFocusInWindow());
         }
     }
 

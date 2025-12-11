@@ -2,6 +2,8 @@ package com.gt;
 
 import com.gt.sync.NoteFileSync;
 import com.gt.service.NoteService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -25,6 +27,7 @@ import java.util.concurrent.*;
  */
 public class DbSyncService {
 
+    private static final Logger logger = LoggerFactory.getLogger(DbSyncService.class);
     private static volatile DbSyncService INSTANCE;
 
     public static DbSyncService getInstance() {
@@ -51,9 +54,9 @@ public class DbSyncService {
         this.useFileSync = true;
         
         if (useFileSync) {
-            System.out.println("[DbSync] 使用文件级增量同步模式");
+            logger.info("[DbSync] 使用文件级增量同步模式");
         } else {
-            System.out.println("[DbSync] 使用整库同步模式（旧模式）");
+            logger.info("[DbSync] 使用整库同步模式（旧模式）");
         }
     }
 
@@ -74,7 +77,7 @@ public class DbSyncService {
      * - 整库模式：从云端拉取最新数据库
      */
     public boolean syncFromCloudOnStart() {
-        System.out.println(">>> [DbSyncService] syncFromCloudOnStart() 被调用");
+        logger.debug(">>> [DbSyncService] syncFromCloudOnStart() 被调用");
         
         if (useFileSync) {
             // 文件同步模式
@@ -92,8 +95,8 @@ public class DbSyncService {
      * - 整库模式：上传整个数据库
      */
     public boolean syncToCloud() {
-        System.out.println(">>> [DbSyncService] syncToCloud() 被调用");
-        System.out.println(">>> [DbSyncService] 使用文件同步: " + useFileSync);
+        logger.debug(">>> [DbSyncService] syncToCloud() 被调用");
+        logger.debug(">>> [DbSyncService] 使用文件同步: " + useFileSync);
         
         if (useFileSync) {
             // 文件同步模式
@@ -108,7 +111,7 @@ public class DbSyncService {
         try { 
             syncToCloud(); 
         } catch (Throwable e) {
-            System.err.println("[DbSync] 同步失败: " + e.getMessage());
+            logger.error("[DbSync] 同步失败: " + e.getMessage());
         }
     }
 
@@ -123,7 +126,7 @@ public class DbSyncService {
             try {
                 return syncToCloud();
             } catch (Throwable e) {
-                System.err.println("[DbSync] 同步失败: " + e.getMessage());
+                logger.error("[DbSync] 同步失败: " + e.getMessage());
                 return false;
             }
         });
@@ -131,11 +134,11 @@ public class DbSyncService {
         try {
             return future.get(timeoutSeconds, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
-            System.out.println("[DbSync] 同步超时（" + timeoutSeconds + "秒），跳过同步");
+            logger.info("[DbSync] 同步超时（" + timeoutSeconds + "秒），跳过同步");
             future.cancel(true);
             return false;
         } catch (Exception e) {
-            System.err.println("[DbSync] 同步异常: " + e.getMessage());
+            logger.error("[DbSync] 同步异常: " + e.getMessage());
             return false;
         } finally {
             executor.shutdownNow();
@@ -148,8 +151,8 @@ public class DbSyncService {
      * - 整库模式：下载整个数据库
      */
     public boolean syncFromCloud() {
-        System.out.println(">>> [DbSyncService] syncFromCloud() 被调用");
-        System.out.println(">>> [DbSyncService] 使用文件同步: " + useFileSync);
+        logger.debug(">>> [DbSyncService] syncFromCloud() 被调用");
+        logger.debug(">>> [DbSyncService] 使用文件同步: " + useFileSync);
         
         if (useFileSync) {
             // 文件同步模式
@@ -177,11 +180,11 @@ public class DbSyncService {
      * 旧模式：上传整个数据库到云端
      */
     private boolean legacySyncToCloud() {
-        System.out.println(">>> [DbSyncService] 执行旧模式整库同步");
+        logger.debug(">>> [DbSyncService] 执行旧模式整库同步");
         
         // 0. 执行 WAL checkpoint 确保数据写入主文件
         if (!checkpointWAL()) {
-            System.err.println(">>> [DbSyncService] ⚠️ WAL checkpoint 失败，但继续上传");
+            logger.error(">>> [DbSyncService] ⚠️ WAL checkpoint 失败，但继续上传");
         }
         
         // 使用旧的 WebDAV 同步
@@ -215,11 +218,11 @@ public class DbSyncService {
             
             // 执行 PRAGMA wal_checkpoint(TRUNCATE)
             stmt.execute("PRAGMA wal_checkpoint(TRUNCATE)");
-            System.out.println(">>> [DbSyncService] WAL checkpoint 执行成功");
+            logger.debug(">>> [DbSyncService] WAL checkpoint 执行成功");
             
             return true;
         } catch (Exception e) {
-            System.err.println(">>> [DbSyncService] ❌ WAL checkpoint 失败: " + e.getMessage());
+            logger.error(">>> [DbSyncService] ❌ WAL checkpoint 失败: " + e.getMessage());
             return false;
         }
     }
