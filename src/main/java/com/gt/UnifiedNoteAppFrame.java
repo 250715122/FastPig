@@ -237,6 +237,21 @@ public class UnifiedNoteAppFrame extends JFrame {
     private int currentSearchIndex = -1;
     private final List<Integer> searchMatchPositions = new ArrayList<>();
 
+    // 批量替换组件
+    private JPanel replacePanel;
+    private JTextField replaceFindField;
+    private JTextField replaceWithField;
+    private JLabel replaceResultLabel;
+    private JCheckBox replaceCaseSensitive;
+    private JCheckBox replaceUseRegex;
+    private final List<Object> replaceHighlightTags = new ArrayList<>();
+    private int currentReplaceIndex = -1;
+    private final List<Integer> replaceMatchPositions = new ArrayList<>();
+    private final List<Integer> replaceMatchLengths = new ArrayList<>();
+
+    // 多光标管理器
+    private MultiCursorManager multiCursorManager;
+
     private NoteDto current;
 
     public UnifiedNoteAppFrame(NoteRepository repository) {
@@ -390,6 +405,13 @@ public class UnifiedNoteAppFrame extends JFrame {
 
         // 初始化页内搜索面板
         initSearchPanel();
+        
+        // 初始化批量替换面板
+        initReplacePanel();
+        
+        // 初始化多光标管理器
+        multiCursorManager = new MultiCursorManager(bodyArea);
+        multiCursorManager.install();
 
         editorPanel = new JPanel(new BorderLayout(8, 8));
         editorPanel.add(bodyScrollPane, BorderLayout.CENTER);
@@ -594,11 +616,34 @@ public class UnifiedNoteAppFrame extends JFrame {
         root.getActionMap().put("boldSelection", new AbstractAction(){
             @Override public void actionPerformed(ActionEvent e){ wrapSelection("**", "**"); }
         });
-        // Ctrl+R 标红
-        KeyStroke ksRed = KeyStroke.getKeyStroke('R', java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        // Ctrl+Shift+R 标红
+        KeyStroke ksRed = KeyStroke.getKeyStroke('R', java.awt.event.InputEvent.CTRL_DOWN_MASK | java.awt.event.InputEvent.SHIFT_DOWN_MASK);
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksRed, "redSelection");
         root.getActionMap().put("redSelection", new AbstractAction(){
             @Override public void actionPerformed(ActionEvent e){ wrapSelection("<span style=\"color:#e53935\">", "</span>"); }
+        });
+        // Ctrl+R 批量替换
+        KeyStroke ksReplace = KeyStroke.getKeyStroke('R', java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksReplace, "showReplacePanel");
+        root.getActionMap().put("showReplacePanel", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ toggleReplacePanel(); }
+        });
+        // Alt+Shift+Up/Down 多光标
+        KeyStroke ksMultiCursorUp = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_UP, 
+            java.awt.event.InputEvent.ALT_DOWN_MASK | java.awt.event.InputEvent.SHIFT_DOWN_MASK);
+        KeyStroke ksMultiCursorDown = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_DOWN, 
+            java.awt.event.InputEvent.ALT_DOWN_MASK | java.awt.event.InputEvent.SHIFT_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksMultiCursorUp, "addCaretUp");
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksMultiCursorDown, "addCaretDown");
+        root.getActionMap().put("addCaretUp", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ 
+                if (multiCursorManager != null) multiCursorManager.addCaretUp(); 
+            }
+        });
+        root.getActionMap().put("addCaretDown", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ 
+                if (multiCursorManager != null) multiCursorManager.addCaretDown(); 
+            }
         });
         // Ctrl+1..5 标题级别
         KeyStroke ksH1 = KeyStroke.getKeyStroke('1', java.awt.event.InputEvent.CTRL_DOWN_MASK);
@@ -2612,6 +2657,383 @@ public class UnifiedNoteAppFrame extends JFrame {
             bodyArea.getHighlighter().removeHighlight(tag);
         }
         searchHighlightTags.clear();
+    }
+
+    // ===== 批量替换功能 =====
+    
+    /**
+     * 初始化批量替换面板
+     */
+    private void initReplacePanel() {
+        replacePanel = new JPanel(new BorderLayout(8, 0));
+        replacePanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(200, 200, 200)),
+            BorderFactory.createEmptyBorder(8, 8, 8, 8)
+        ));
+        replacePanel.setBackground(new Color(245, 245, 245));
+        
+        // 左侧面板：输入框和按钮
+        JPanel leftPanel = new JPanel();
+        leftPanel.setLayout(new BoxLayout(leftPanel, BoxLayout.Y_AXIS));
+        leftPanel.setOpaque(false);
+        
+        // 第一行：查找
+        JPanel findRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        findRow.setOpaque(false);
+        JLabel findLabel = new JLabel("查找:");
+        replaceFindField = new JTextField(25);
+        JButton findNextBtn = new JButton("下一个");
+        JButton findPrevBtn = new JButton("上一个");
+        
+        findNextBtn.setMargin(new Insets(2, 8, 2, 8));
+        findPrevBtn.setMargin(new Insets(2, 8, 2, 8));
+        findNextBtn.addActionListener(e -> replaceFindNext());
+        findPrevBtn.addActionListener(e -> replaceFindPrevious());
+        
+        findRow.add(findLabel);
+        findRow.add(replaceFindField);
+        findRow.add(findPrevBtn);
+        findRow.add(findNextBtn);
+        
+        // 第二行：替换
+        JPanel replaceRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        replaceRow.setOpaque(false);
+        JLabel replaceLabel = new JLabel("替换:");
+        replaceWithField = new JTextField(25);
+        JButton replaceBtn = new JButton("替换");
+        JButton replaceAllBtn = new JButton("全部替换");
+        
+        replaceBtn.setMargin(new Insets(2, 8, 2, 8));
+        replaceAllBtn.setMargin(new Insets(2, 8, 2, 8));
+        replaceBtn.addActionListener(e -> replaceCurrentMatch());
+        replaceAllBtn.addActionListener(e -> replaceAllMatches());
+        
+        replaceRow.add(replaceLabel);
+        replaceRow.add(replaceWithField);
+        replaceRow.add(replaceBtn);
+        replaceRow.add(replaceAllBtn);
+        
+        // 第三行：选项
+        JPanel optionsRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 20, 2));
+        optionsRow.setOpaque(false);
+        replaceCaseSensitive = new JCheckBox("区分大小写");
+        replaceUseRegex = new JCheckBox("正则表达式");
+        replaceResultLabel = new JLabel("");
+        
+        optionsRow.add(replaceCaseSensitive);
+        optionsRow.add(replaceUseRegex);
+        optionsRow.add(replaceResultLabel);
+        
+        leftPanel.add(findRow);
+        leftPanel.add(replaceRow);
+        leftPanel.add(optionsRow);
+        
+        // 右侧：关闭按钮
+        JButton closeBtn = new JButton("×");
+        closeBtn.setMargin(new Insets(2, 8, 2, 8));
+        closeBtn.addActionListener(e -> toggleReplacePanel());
+        
+        replacePanel.add(leftPanel, BorderLayout.CENTER);
+        replacePanel.add(closeBtn, BorderLayout.EAST);
+        
+        // 查找框输入时实时搜索
+        replaceFindField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { performReplaceSearch(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { performReplaceSearch(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { performReplaceSearch(); }
+        });
+        
+        // 查找框回车时查找下一个
+        replaceFindField.addActionListener(e -> replaceFindNext());
+        
+        // 替换框回车时执行替换
+        replaceWithField.addActionListener(e -> replaceCurrentMatch());
+        
+        // ESC 关闭替换面板
+        replaceFindField.getInputMap(JComponent.WHEN_FOCUSED).put(
+            KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0), "closeReplace");
+        replaceFindField.getActionMap().put("closeReplace", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { toggleReplacePanel(); }
+        });
+        
+        replaceWithField.getInputMap(JComponent.WHEN_FOCUSED).put(
+            KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0), "closeReplace");
+        replaceWithField.getActionMap().put("closeReplace", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { toggleReplacePanel(); }
+        });
+        
+        // 选项变化时重新搜索
+        replaceCaseSensitive.addActionListener(e -> performReplaceSearch());
+        replaceUseRegex.addActionListener(e -> performReplaceSearch());
+        
+        replacePanel.setVisible(false); // 默认隐藏
+    }
+    
+    /**
+     * 切换替换面板的显示/隐藏
+     */
+    private void toggleReplacePanel() {
+        if (replacePanel.isVisible()) {
+            // 隐藏替换面板
+            replacePanel.setVisible(false);
+            getContentPane().remove(replacePanel);
+            clearReplaceHighlights();
+            bodyArea.requestFocusInWindow();
+            getContentPane().revalidate();
+            getContentPane().repaint();
+        } else {
+            // 隐藏搜索面板（如果显示）
+            if (searchPanel.isVisible()) {
+                searchPanel.setVisible(false);
+                getContentPane().remove(searchPanel);
+                clearSearchHighlights();
+            }
+            
+            // 显示替换面板
+            getContentPane().add(replacePanel, BorderLayout.NORTH);
+            replacePanel.setVisible(true);
+            
+            // 如果有选中的文本，自动填充到查找框
+            String selectedText = bodyArea.getSelectedText();
+            if (selectedText != null && !selectedText.isEmpty() && !selectedText.contains("\n")) {
+                replaceFindField.setText(selectedText);
+            }
+            
+            replaceFindField.requestFocusInWindow();
+            replaceFindField.selectAll();
+            getContentPane().revalidate();
+            getContentPane().repaint();
+        }
+    }
+    
+    /**
+     * 执行替换搜索
+     */
+    private void performReplaceSearch() {
+        String keyword = replaceFindField.getText();
+        clearReplaceHighlights();
+        replaceMatchPositions.clear();
+        replaceMatchLengths.clear();
+        currentReplaceIndex = -1;
+        
+        if (keyword.isEmpty()) {
+            replaceResultLabel.setText("");
+            return;
+        }
+        
+        try {
+            if (replaceUseRegex.isSelected()) {
+                // 正则表达式搜索
+                java.util.regex.Pattern pattern;
+                if (replaceCaseSensitive.isSelected()) {
+                    pattern = java.util.regex.Pattern.compile(keyword);
+                } else {
+                    pattern = java.util.regex.Pattern.compile(keyword, java.util.regex.Pattern.CASE_INSENSITIVE);
+                }
+                java.util.regex.Matcher matcher = pattern.matcher(bodyArea.getText());
+                
+                while (matcher.find()) {
+                    int start = matcher.start();
+                    int end = matcher.end();
+                    replaceMatchPositions.add(start);
+                    replaceMatchLengths.add(end - start);
+                    
+                    Object tag = bodyArea.getHighlighter().addHighlight(
+                        start, end, searchHighlightPainter);
+                    replaceHighlightTags.add(tag);
+                }
+            } else {
+                // 普通文本搜索
+                String text = bodyArea.getText();
+                String searchText = keyword;
+                
+                if (!replaceCaseSensitive.isSelected()) {
+                    text = text.toLowerCase();
+                    searchText = searchText.toLowerCase();
+                }
+                
+                int pos = 0;
+                while ((pos = text.indexOf(searchText, pos)) >= 0) {
+                    replaceMatchPositions.add(pos);
+                    replaceMatchLengths.add(keyword.length());
+                    
+                    Object tag = bodyArea.getHighlighter().addHighlight(
+                        pos, pos + keyword.length(), searchHighlightPainter);
+                    replaceHighlightTags.add(tag);
+                    
+                    pos += searchText.length();
+                }
+            }
+            
+            if (replaceMatchPositions.isEmpty()) {
+                replaceResultLabel.setText("未找到");
+            } else {
+                currentReplaceIndex = 0;
+                highlightCurrentReplaceMatch();
+                replaceResultLabel.setText((currentReplaceIndex + 1) + "/" + replaceMatchPositions.size());
+            }
+        } catch (Exception e) {
+            replaceResultLabel.setText("搜索错误: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * 查找下一个匹配项
+     */
+    private void replaceFindNext() {
+        if (replaceMatchPositions.isEmpty()) return;
+        
+        currentReplaceIndex = (currentReplaceIndex + 1) % replaceMatchPositions.size();
+        highlightCurrentReplaceMatch();
+        replaceResultLabel.setText((currentReplaceIndex + 1) + "/" + replaceMatchPositions.size());
+    }
+    
+    /**
+     * 查找上一个匹配项
+     */
+    private void replaceFindPrevious() {
+        if (replaceMatchPositions.isEmpty()) return;
+        
+        currentReplaceIndex = (currentReplaceIndex - 1 + replaceMatchPositions.size()) % replaceMatchPositions.size();
+        highlightCurrentReplaceMatch();
+        replaceResultLabel.setText((currentReplaceIndex + 1) + "/" + replaceMatchPositions.size());
+    }
+    
+    /**
+     * 高亮显示当前替换匹配项
+     */
+    private void highlightCurrentReplaceMatch() {
+        if (currentReplaceIndex < 0 || currentReplaceIndex >= replaceMatchPositions.size()) return;
+        
+        int pos = replaceMatchPositions.get(currentReplaceIndex);
+        int length = replaceMatchLengths.get(currentReplaceIndex);
+        
+        bodyArea.setSelectionStart(pos);
+        bodyArea.setSelectionEnd(pos + length);
+        bodyArea.setCaretPosition(pos + length);
+        
+        try {
+            bodyArea.scrollRectToVisible(bodyArea.modelToView2D(pos).getBounds());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * 替换当前匹配项
+     */
+    private void replaceCurrentMatch() {
+        if (replaceMatchPositions.isEmpty() || currentReplaceIndex < 0 || currentReplaceIndex >= replaceMatchPositions.size()) {
+            return;
+        }
+        
+        String replaceText = replaceWithField.getText();
+        int pos = replaceMatchPositions.get(currentReplaceIndex);
+        int length = replaceMatchLengths.get(currentReplaceIndex);
+        
+        try {
+            // 执行替换
+            bodyArea.replaceRange(replaceText, pos, pos + length);
+            
+            // 重新搜索（替换后位置会变化）
+            performReplaceSearch();
+            
+            // 如果还有匹配项，移到下一个
+            if (!replaceMatchPositions.isEmpty()) {
+                if (currentReplaceIndex >= replaceMatchPositions.size()) {
+                    currentReplaceIndex = replaceMatchPositions.size() - 1;
+                }
+                highlightCurrentReplaceMatch();
+                replaceResultLabel.setText((currentReplaceIndex + 1) + "/" + replaceMatchPositions.size());
+            }
+        } catch (Exception e) {
+            replaceResultLabel.setText("替换错误: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * 批量替换所有匹配项
+     */
+    private void replaceAllMatches() {
+        if (replaceMatchPositions.isEmpty()) {
+            return;
+        }
+        
+        String keyword = replaceFindField.getText();
+        String replaceText = replaceWithField.getText();
+        
+        if (keyword.isEmpty()) {
+            return;
+        }
+        
+        // 确认对话框
+        int count = replaceMatchPositions.size();
+        int confirm = JOptionPane.showConfirmDialog(
+            this,
+            "确定要替换全部 " + count + " 处匹配项吗？",
+            "确认批量替换",
+            JOptionPane.YES_NO_OPTION,
+            JOptionPane.QUESTION_MESSAGE
+        );
+        
+        if (confirm != JOptionPane.YES_OPTION) {
+            return;
+        }
+        
+        try {
+            String text = bodyArea.getText();
+            String newText;
+            
+            if (replaceUseRegex.isSelected()) {
+                // 正则表达式替换
+                java.util.regex.Pattern pattern;
+                if (replaceCaseSensitive.isSelected()) {
+                    pattern = java.util.regex.Pattern.compile(keyword);
+                } else {
+                    pattern = java.util.regex.Pattern.compile(keyword, java.util.regex.Pattern.CASE_INSENSITIVE);
+                }
+                newText = pattern.matcher(text).replaceAll(replaceText);
+            } else {
+                // 普通文本替换
+                if (replaceCaseSensitive.isSelected()) {
+                    newText = text.replace(keyword, replaceText);
+                } else {
+                    // 不区分大小写的替换
+                    newText = text.replaceAll("(?i)" + java.util.regex.Pattern.quote(keyword), 
+                        java.util.regex.Matcher.quoteReplacement(replaceText));
+                }
+            }
+            
+            bodyArea.setText(newText);
+            
+            // 显示结果
+            replaceResultLabel.setText("已替换 " + count + " 处");
+            
+            // 重新搜索以更新状态
+            performReplaceSearch();
+            
+        } catch (Exception e) {
+            replaceResultLabel.setText("批量替换错误: " + e.getMessage());
+            JOptionPane.showMessageDialog(
+                this,
+                "批量替换时发生错误: " + e.getMessage(),
+                "错误",
+                JOptionPane.ERROR_MESSAGE
+            );
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * 清除所有替换高亮
+     */
+    private void clearReplaceHighlights() {
+        for (Object tag : replaceHighlightTags) {
+            bodyArea.getHighlighter().removeHighlight(tag);
+        }
+        replaceHighlightTags.clear();
     }
 
     // ===== 选区悬浮工具条 =====
