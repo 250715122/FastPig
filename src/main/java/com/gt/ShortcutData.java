@@ -38,57 +38,49 @@ public class ShortcutData {
     }
     
     /**
-     * 获取所有快捷键分类（移除emoji，使用颜色代码）
+     * 获取核心快捷键分类（2x2布局，使用颜色代码）
      */
     public static List<ShortcutCategory> getCategories() {
         List<ShortcutCategory> categories = new ArrayList<>();
         
-        // 编辑操作 - 蓝色
+        // 编辑操作 - 蓝色（合并笔记管理）
         categories.add(new ShortcutCategory("编辑操作", "#409EFF", List.of(
             new Shortcut("Ctrl+S", "保存当前笔记"),
-            new Shortcut("Ctrl+Z", "撤销上一步操作"),
-            new Shortcut("Ctrl+Y", "重做被撤销的操作"),
+            new Shortcut("Ctrl+Z", "撤销操作"),
             new Shortcut("Ctrl+F", "页内搜索"),
-            new Shortcut("Ctrl+R", "批量替换")
+            new Shortcut("Ctrl+R", "批量替换"),
+            new Shortcut("Alt+D", "删除笔记"),
+            new Shortcut("/", "快捷菜单")
         )));
         
         // 格式化 - 绿色
         categories.add(new ShortcutCategory("格式化", "#67C23A", List.of(
-            new Shortcut("Ctrl+B", "加粗选中文本"),
-            new Shortcut("Ctrl+Shift+R", "标红选中文本"),
-            new Shortcut("Ctrl+1-5", "设置标题级别"),
-            new Shortcut("Ctrl+E", "显示格式化工具条"),
-            new Shortcut("Tab", "列表缩进/反缩进")
+            new Shortcut("Ctrl+B", "加粗文本"),
+            new Shortcut("Ctrl+Shift+R", "标红文本"),
+            new Shortcut("Ctrl+1-5", "标题级别"),
+            new Shortcut("Ctrl+E", "格式工具条"),
+            new Shortcut("Tab", "列表缩进"),
+            new Shortcut("Alt+Shift+↑↓", "多光标")
         )));
         
         // 视图切换 - 橙色
         categories.add(new ShortcutCategory("视图切换", "#E6A23C", List.of(
-            new Shortcut("Alt+P", "切换预览模式"),
+            new Shortcut("Alt+P", "切换预览"),
             new Shortcut("Alt+F", "全屏预览"),
-            new Shortcut("Alt+T", "显示/隐藏目录")
-        )));
-        
-        // 笔记管理 - 紫色
-        categories.add(new ShortcutCategory("笔记管理", "#9C27B0", List.of(
-            new Shortcut("Alt+D", "软删除当前笔记"),
-            new Shortcut("Alt+Z", "撤销删除笔记"),
-            new Shortcut("/", "斜杠快捷命令菜单")
-        )));
-        
-        // 多光标编辑 - 青色
-        categories.add(new ShortcutCategory("多光标编辑", "#00BCD4", List.of(
-            new Shortcut("Alt+Shift+↓", "向下添加光标"),
-            new Shortcut("Alt+Shift+↑", "向上添加光标"),
-            new Shortcut("Alt+拖动", "矩形选区"),
-            new Shortcut("Esc", "退出多光标模式")
+            new Shortcut("Alt+T", "显示目录"),
+            new Shortcut("Ctrl+Home", "跳到顶部"),
+            new Shortcut("Ctrl+L", "选择首行"),
+            new Shortcut("Esc", "关闭面板")
         )));
         
         // 系统功能 - 灰色
         categories.add(new ShortcutCategory("系统功能", "#909399", List.of(
             new Shortcut("Ctrl+,", "打开设置"),
-            new Shortcut("Alt+S", "上传到云端"),
-            new Shortcut("Alt+U", "从云端下载"),
-            new Shortcut("Alt+Q", "退出程序")
+            new Shortcut("Alt+S", "上传云端"),
+            new Shortcut("Alt+U", "下载云端"),
+            new Shortcut("Alt+Z", "撤销删除"),
+            new Shortcut("Alt+Q", "退出程序"),
+            new Shortcut("Alt+M", "最大化")
         )));
         
         return categories;
