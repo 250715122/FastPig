@@ -7,6 +7,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 同步元数据管理
@@ -22,7 +23,7 @@ public class SyncMetadata {
 
     public SyncMetadata() {
         this.lastSyncTime = 0;
-        this.files = new HashMap<>();
+        this.files = new ConcurrentHashMap<>();
     }
 
     /**

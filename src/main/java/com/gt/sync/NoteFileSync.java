@@ -78,6 +78,8 @@ public class NoteFileSync {
             int uploadedCount = 0;
             int skippedCount = 0;
             int failedCount = 0;
+            int conflictCount = 0;
+            java.util.List<String> conflictList = new java.util.ArrayList<>();
 
             // 先统计需要上传的文件数
             java.util.List<Path> toUpload = new java.util.ArrayList<>();
@@ -86,6 +88,7 @@ public class NoteFileSync {
                     if (!Files.isDirectory(folderPath)) continue;
                     String folderName = folderPath.getFileName().toString();
                     if (folderName.startsWith(".")) continue;
+                    
                     if (shouldUpload(folderPath, lastSyncTime, syncMeta)) {
                         toUpload.add(folderPath);
                     } else {
@@ -95,18 +98,45 @@ public class NoteFileSync {
             }
 
             int total = toUpload.size();
+            System.out.println("\n=== [云同步上传] ===");
+            if (total > 0) {
+                System.out.println("需要上传: " + total + " 个笔记");
+                for (Path p : toUpload) {
+                    System.out.println("  - " + p.getFileName().toString());
+                }
+            } else {
+                System.out.println("所有笔记都是最新，无需上传");
+            }
+            System.out.println("跳过: " + skippedCount + " 个（未修改）");
             logger.info("[NoteFileSync] 需要上传: " + total + " 个, 跳过: " + skippedCount + " 个");
 
-            // 上传文件（带进度显示）
+            // 上传文件（带进度显示和冲突检测）
+            if (total > 0) {
+                System.out.println("\n正在上传...");
+            }
+            
             for (int i = 0; i < toUpload.size(); i++) {
                 Path folderPath = toUpload.get(i);
+                String folderName = folderPath.getFileName().toString();
+                System.out.print("  [" + (i + 1) + "/" + total + "] " + folderName + " ... ");
                 logger.info("[NoteFileSync] 上传进度: " + (i + 1) + "/" + total);
+                
+                // 上传前检查云端版本，防止覆盖更新的数据
+                if (checkUploadConflict(folderPath, folderName)) {
+                    conflictCount++;
+                    conflictList.add(folderName);
+                    System.out.println("⚠️  冲突");
+                    logger.warn("[NoteFileSync] 上传冲突（云端版本更高）: " + folderName);
+                    continue; // 跳过上传
+                }
                 
                 if (uploadNoteFolder(folderPath)) {
                     uploadedCount++;
                     updateSyncMetadata(syncMeta, folderPath);
+                    System.out.println("✓");
                 } else {
                     failedCount++;
+                    System.out.println("✗ 失败");
                 }
             }
 
@@ -118,7 +148,22 @@ public class NoteFileSync {
             uploadSyncMetaToCloud(syncMeta);
 
             long elapsed = System.currentTimeMillis() - startTime;
-            logger.info("[NoteFileSync] 上传同步完成: 成功 " + uploadedCount + " 个, 失败 " + failedCount + " 个, 跳过 " + skippedCount + " 个, 耗时 " + elapsed + "ms");
+            System.out.println("\n上传完成: 成功 " + uploadedCount + " 个" + 
+                (failedCount > 0 ? ", 失败 " + failedCount + " 个" : "") + 
+                (conflictCount > 0 ? ", 冲突 " + conflictCount + " 个" : "") +
+                ", 耗时 " + (elapsed / 1000.0) + " 秒");
+            
+            // 如果有冲突，提示用户
+            if (conflictCount > 0) {
+                System.out.println("\n⚠️  检测到版本冲突的笔记：");
+                for (String conflictKey : conflictList) {
+                    System.out.println("   • " + conflictKey + " (云端版本更高，已跳过上传)");
+                }
+                System.out.println("\n建议：先执行 Alt+U 下载云端最新版本，再编辑。");
+            }
+            
+            System.out.println("==================\n");
+            logger.info("[NoteFileSync] 上传同步完成: 成功 " + uploadedCount + " 个, 失败 " + failedCount + " 个, 冲突 " + conflictCount + " 个, 跳过 " + skippedCount + " 个, 耗时 " + elapsed + "ms");
 
             return true;
 
@@ -345,6 +390,46 @@ public class NoteFileSync {
     }
 
     /**
+     * 上传前检查云端版本，防止覆盖更新的数据
+     * 
+     * @return true 如果检测到冲突（云端版本更高），false 如果无冲突（可以上传）
+     */
+    private boolean checkUploadConflict(Path folderPath, String folderName) {
+        try {
+            // 读取本地笔记
+            NoteDto localNote = fileStorage.loadFromFile(folderPath);
+            if (localNote == null) {
+                return false; // 本地无法读取，无法判断冲突
+            }
+            
+            // 尝试下载云端 note.md
+            String remotePath = folderName + "/note.md";
+            byte[] cloudData = cloudProvider.download(remotePath);
+            
+            if (cloudData == null) {
+                return false; // 云端不存在，无冲突，可以上传
+            }
+            
+            // 解析云端版本号
+            String cloudContent = new String(cloudData, StandardCharsets.UTF_8);
+            int cloudVersion = parseVersion(cloudContent);
+            
+            // 比较版本号
+            if (cloudVersion > localNote.version) {
+                logger.warn("[NoteFileSync] 检测到上传冲突: " + folderName + 
+                    " (本地 v" + localNote.version + " < 云端 v" + cloudVersion + ")");
+                return true; // 冲突！云端版本更高
+            }
+            
+            return false; // 无冲突，可以上传
+            
+        } catch (Exception e) {
+            logger.error("[NoteFileSync] 检查上传冲突失败: " + folderName + " - " + e.getMessage());
+            return false; // 出错时允许上传（保守策略）
+        }
+    }
+
+    /**
      * 判断是否需要上传
      * 
      * 比较逻辑：
@@ -375,10 +460,12 @@ public class NoteFileSync {
 
             // 元数据自愈：如果历史 size/mtime 为 0，则用当前实际值修复，避免全量上传
             if (fm.lastModified == 0 || fm.size == 0) {
+                System.out.println("⚠️  警告: 元数据损坏已自动修复，强制上传: " + relativePath);
+                logger.warn("[NoteFileSync] 元数据自愈: " + relativePath + " (旧: size=" + fm.size + ", mtime=" + fm.lastModified + ")");
                 fm.lastModified = fileModified;
                 fm.size = fileSize;
                 syncMeta.updateFile(relativePath, fileModified, fileSize, "");
-                return false; // 修复后本次不传，后续按正常增量判断
+                return true; // 修复后强制本次上传，确保云端同步
             }
 
             // 比较文件修改时间和大小与 SyncMetadata 中记录的值
@@ -505,13 +592,15 @@ public class NoteFileSync {
                 return false;
             }
 
-            // 元数据缺损自愈：历史 size/mtime 为 0 时直接修复并跳过下载
+            // 元数据缺损自愈：历史 size/mtime 为 0 时直接修复并强制下载
             if ((fm.size == 0 && localSize > 0) || fm.cloudModified == 0) {
+                System.out.println("⚠️  警告: 元数据损坏已自动修复，强制下载: " + folderName);
+                logger.warn("[NoteFileSync] 元数据自愈: " + folderName + " (旧: size=" + fm.size + ", cloudModified=" + fm.cloudModified + ")");
                 long fixedCloud = (fm.cloudModified == 0) ? localModified : fm.cloudModified;
                 fm.size = localSize;
                 fm.cloudModified = fixedCloud;
                 syncMeta.updateFileWithCloudTime(folderName, localModified, localSize, fixedCloud);
-                return false;
+                return true; // 修复后强制本次下载，确保本地同步
             }
 
             // 云端大小与记录相同 → 云端没变，直接跳过
@@ -626,7 +715,9 @@ public class NoteFileSync {
                     String remotePath = folderName + "/" + relativePath;
 
                     byte[] data = Files.readAllBytes(file);
+                    
                     if (!cloudProvider.upload(remotePath, data)) {
+                        System.out.println("\n    ✗ 失败: " + remotePath);
                         logger.error("[NoteFileSync] 上传失败: " + remotePath);
                         return false;
                     }
@@ -636,7 +727,12 @@ public class NoteFileSync {
             return true;
 
         } catch (IOException e) {
+            System.out.println("\n    ✗ IO异常: " + e.getMessage());
             logger.error("[NoteFileSync] 上传文件夹失败: " + e.getMessage());
+            return false;
+        } catch (Exception e) {
+            System.out.println("\n    ✗ 异常: " + e.getMessage());
+            e.printStackTrace();
             return false;
         }
     }

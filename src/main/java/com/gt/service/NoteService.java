@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.List;
@@ -49,6 +50,9 @@ public class NoteService {
             throw new IllegalArgumentException("笔记或笔记ID不能为空");
         }
 
+        // 自动递增版本号
+        autoIncrementVersion(note);
+
         // 计算内容哈希
         note.contentHash = computeHash(note.bodyMd);
 
@@ -62,7 +66,7 @@ public class NoteService {
         // 更新索引（不存储正文，只存储元数据）
         repository.saveIndex(note);
 
-        logger.info("[NoteService] 已保存笔记: " + note.key + " (id=" + note.id + ")");
+        logger.info("[NoteService] 已保存笔记: " + note.key + " (id=" + note.id + ", version=" + note.version + ")");
     }
 
     /**
@@ -201,6 +205,38 @@ public class NoteService {
     }
 
     /**
+     * 自动递增版本号
+     * 如果是新笔记，从 version=1 开始
+     * 如果是已存在的笔记，在旧版本号基础上 +1
+     */
+    private void autoIncrementVersion(NoteDto note) {
+        try {
+            // 尝试读取旧笔记
+            NoteDto oldNote = repository.findById(note.id);
+            
+            if (oldNote == null || oldNote.version <= 0) {
+                // 新笔记或旧笔记无版本号，从 1 开始
+                if (note.version <= 0) {
+                    note.version = 1;
+                }
+                // 如果用户手动设置了版本号（>0），保留用户设置
+            } else {
+                // 已存在的笔记，自动递增
+                note.version = oldNote.version + 1;
+            }
+            
+            logger.debug("[NoteService] 版本号: " + note.key + " → v" + note.version);
+            
+        } catch (Exception e) {
+            // 出错时保持原版本号或设为 1
+            if (note.version <= 0) {
+                note.version = 1;
+            }
+            logger.warn("[NoteService] 版本号递增失败，使用 v" + note.version + ": " + e.getMessage());
+        }
+    }
+
+    /**
      * 计算内容哈希
      */
     private String computeHash(String content) {
@@ -233,5 +269,6 @@ public class NoteService {
     public NoteFileStorage getFileStorage() {
         return fileStorage;
     }
+
 }
 
