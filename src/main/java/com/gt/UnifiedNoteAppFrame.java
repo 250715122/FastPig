@@ -3711,82 +3711,150 @@ public class UnifiedNoteAppFrame extends JFrame {
         Graphics2D g2 = (Graphics2D) g.create();
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         
         int width = bodyArea.getWidth();
         int height = bodyArea.getHeight();
         
         // 标题
-        g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 24));
+        g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 28));
         g2.setColor(UIColors.PRIMARY);
         String title = "🐷 FastPig 快捷命令笔记管理";
         FontMetrics titleFm = g2.getFontMetrics();
         int titleX = (width - titleFm.stringWidth(title)) / 2;
-        int titleY = 60;
+        int titleY = 70;
         g2.drawString(title, titleX, titleY);
         
         // 副标题
-        g2.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+        g2.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 14));
         g2.setColor(UIColors.TEXT_SECONDARY);
         String subtitle = "开始输入以创建笔记，或使用以下快捷键提升效率";
         FontMetrics subtitleFm = g2.getFontMetrics();
         int subtitleX = (width - subtitleFm.stringWidth(subtitle)) / 2;
-        int subtitleY = titleY + 30;
+        int subtitleY = titleY + 35;
         g2.drawString(subtitle, subtitleX, subtitleY);
         
         // 获取快捷键数据
         java.util.List<ShortcutData.ShortcutCategory> categories = ShortcutData.getCategories();
         
         // 根据宽度决定列数
-        int columns = width >= 1200 ? 3 : (width >= 800 ? 2 : 1);
-        int categoryWidth = (width - 100) / columns;
-        int startY = subtitleY + 50;
+        int columns = width >= 1200 ? 3 : (width >= 850 ? 2 : 1);
+        int gap = 20; // 列间距
+        int totalGap = gap * (columns - 1);
+        int categoryWidth = (width - 100 - totalGap) / columns;
+        int startY = subtitleY + 60;
         int currentX = 50;
         int currentY = startY;
-        int maxYInColumn = startY;
         
         int categoryIndex = 0;
         for (ShortcutData.ShortcutCategory category : categories) {
+            // 计算分类高度
+            int categoryHeight = 50 + category.shortcuts.size() * 28 + 20;
+            
             // 如果当前列放不下，换到下一列
-            int categoryHeight = 30 + category.shortcuts.size() * 22 + 15;
-            if (currentY + categoryHeight > height - 50 && categoryIndex > 0) {
-                // 换列
-                currentX += categoryWidth;
+            if (currentY + categoryHeight > height - 80 && categoryIndex > 0) {
+                currentX += categoryWidth + gap;
                 currentY = startY;
                 
                 // 如果换列后超出宽度，停止绘制
-                if (currentX + categoryWidth > width) {
+                if (currentX + categoryWidth > width - 50) {
                     break;
                 }
             }
             
+            // 绘制卡片背景
+            drawCategoryCard(g2, currentX, currentY - 10, categoryWidth, categoryHeight);
+            
             // 绘制分类标题
-            g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 14));
+            g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 15));
             g2.setColor(UIColors.TEXT_PRIMARY);
-            String categoryTitle = category.icon + " " + category.name;
-            g2.drawString(categoryTitle, currentX, currentY);
-            currentY += 25;
+            String categoryTitle = category.icon + "  " + category.name;
+            g2.drawString(categoryTitle, currentX + 15, currentY + 15);
+            
+            // 绘制分割线
+            g2.setColor(UIColors.BORDER_LIGHT);
+            g2.drawLine(currentX + 15, currentY + 25, currentX + categoryWidth - 15, currentY + 25);
+            
+            currentY += 40;
             
             // 绘制快捷键列表
-            g2.setFont(new Font("Consolas", Font.PLAIN, 12));
             for (ShortcutData.Shortcut shortcut : category.shortcuts) {
-                // 快捷键
-                g2.setColor(UIColors.PRIMARY);
-                g2.drawString(shortcut.keys, currentX + 10, currentY);
+                // 绘制快捷键徽章
+                drawKeyBadge(g2, currentX + 15, currentY - 13, shortcut.keys);
                 
-                // 描述
-                g2.setColor(UIColors.TEXT_PLACEHOLDER);
-                int descX = currentX + 10 + 120; // 快捷键固定宽度120
+                // 绘制描述（使用支持中文的字体）
+                g2.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+                g2.setColor(UIColors.TEXT_SECONDARY);
+                int descX = currentX + 135;
                 g2.drawString(shortcut.description, descX, currentY);
                 
-                currentY += 22;
+                currentY += 28;
             }
             
-            currentY += 15; // 分类间距
-            maxYInColumn = Math.max(maxYInColumn, currentY);
+            currentY += 20; // 分类间距
             categoryIndex++;
         }
         
+        // 底部提示
+        if (height > 500) {
+            g2.setFont(new Font("Microsoft YaHei UI", Font.ITALIC, 12));
+            g2.setColor(UIColors.TEXT_PLACEHOLDER);
+            String hint = "按 Ctrl+, 打开设置 • 按 Ctrl+F 搜索 • 按 / 打开快捷命令";
+            FontMetrics hintFm = g2.getFontMetrics();
+            int hintX = (width - hintFm.stringWidth(hint)) / 2;
+            int hintY = height - 30;
+            g2.drawString(hint, hintX, hintY);
+        }
+        
         g2.dispose();
+    }
+    
+    /**
+     * 绘制分类卡片背景
+     */
+    private void drawCategoryCard(Graphics2D g2, int x, int y, int width, int height) {
+        // 卡片阴影
+        g2.setColor(new Color(0, 0, 0, 8));
+        g2.fillRoundRect(x + 2, y + 2, width, height, 12, 12);
+        
+        // 卡片背景
+        g2.setColor(new Color(248, 250, 252));
+        g2.fillRoundRect(x, y, width, height, 12, 12);
+        
+        // 卡片边框
+        g2.setColor(UIColors.BORDER_LIGHT);
+        g2.drawRoundRect(x, y, width, height, 12, 12);
+    }
+    
+    /**
+     * 绘制快捷键徽章
+     */
+    private void drawKeyBadge(Graphics2D g2, int x, int y, String keys) {
+        g2.setFont(new Font("Consolas", Font.BOLD, 12));
+        FontMetrics fm = g2.getFontMetrics();
+        int keyWidth = fm.stringWidth(keys);
+        int keyHeight = fm.getHeight();
+        
+        int badgeWidth = keyWidth + 16;
+        int badgeHeight = keyHeight + 6;
+        
+        // 徽章阴影
+        g2.setColor(new Color(0, 0, 0, 15));
+        g2.fillRoundRect(x + 1, y + 1, badgeWidth, badgeHeight, 6, 6);
+        
+        // 徽章背景
+        g2.setColor(new Color(240, 242, 245));
+        g2.fillRoundRect(x, y, badgeWidth, badgeHeight, 6, 6);
+        
+        // 徽章边框
+        g2.setColor(new Color(200, 205, 210));
+        g2.drawRoundRect(x, y, badgeWidth, badgeHeight, 6, 6);
+        
+        // 徽章文字
+        g2.setColor(UIColors.PRIMARY);
+        int textX = x + 8;
+        int textY = y + badgeHeight - 8;
+        g2.drawString(keys, textX, textY);
     }
 }
 
