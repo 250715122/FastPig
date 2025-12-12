@@ -637,6 +637,13 @@ public class UnifiedNoteAppFrame extends JFrame {
         root.getActionMap().put("showReplacePanel", new AbstractAction(){
             @Override public void actionPerformed(ActionEvent e){ toggleReplacePanel(); }
         });
+        // Ctrl+, 打开设置
+        KeyStroke ksSettings = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_COMMA, 
+            java.awt.event.InputEvent.CTRL_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksSettings, "openSettings");
+        root.getActionMap().put("openSettings", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ openSettings(); }
+        });
         // Alt+Shift+Up/Down 多光标
         KeyStroke ksMultiCursorUp = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_UP, 
             java.awt.event.InputEvent.ALT_DOWN_MASK | java.awt.event.InputEvent.SHIFT_DOWN_MASK);
@@ -3701,6 +3708,14 @@ public class UnifiedNoteAppFrame extends JFrame {
         }
         
         return html;
+    }
+    
+    /**
+     * 打开设置对话框
+     */
+    private void openSettings() {
+        SettingsDialog settingsDialog = new SettingsDialog(this);
+        settingsDialog.setVisible(true);
     }
 }
 
