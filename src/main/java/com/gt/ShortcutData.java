@@ -38,13 +38,13 @@ public class ShortcutData {
     }
     
     /**
-     * 获取所有快捷键分类
+     * 获取所有快捷键分类（移除emoji，使用颜色代码）
      */
     public static List<ShortcutCategory> getCategories() {
         List<ShortcutCategory> categories = new ArrayList<>();
         
-        // 📝 编辑操作
-        categories.add(new ShortcutCategory("编辑操作", "📝", List.of(
+        // 编辑操作 - 蓝色
+        categories.add(new ShortcutCategory("编辑操作", "#409EFF", List.of(
             new Shortcut("Ctrl+S", "保存当前笔记"),
             new Shortcut("Ctrl+Z", "撤销上一步操作"),
             new Shortcut("Ctrl+Y", "重做被撤销的操作"),
@@ -52,8 +52,8 @@ public class ShortcutData {
             new Shortcut("Ctrl+R", "批量替换")
         )));
         
-        // 🎨 格式化
-        categories.add(new ShortcutCategory("格式化", "🎨", List.of(
+        // 格式化 - 绿色
+        categories.add(new ShortcutCategory("格式化", "#67C23A", List.of(
             new Shortcut("Ctrl+B", "加粗选中文本"),
             new Shortcut("Ctrl+Shift+R", "标红选中文本"),
             new Shortcut("Ctrl+1-5", "设置标题级别"),
@@ -61,30 +61,30 @@ public class ShortcutData {
             new Shortcut("Tab", "列表缩进/反缩进")
         )));
         
-        // 👁 视图切换
-        categories.add(new ShortcutCategory("视图切换", "👁", List.of(
+        // 视图切换 - 橙色
+        categories.add(new ShortcutCategory("视图切换", "#E6A23C", List.of(
             new Shortcut("Alt+P", "切换预览模式"),
             new Shortcut("Alt+F", "全屏预览"),
             new Shortcut("Alt+T", "显示/隐藏目录")
         )));
         
-        // 📋 笔记管理
-        categories.add(new ShortcutCategory("笔记管理", "📋", List.of(
+        // 笔记管理 - 紫色
+        categories.add(new ShortcutCategory("笔记管理", "#9C27B0", List.of(
             new Shortcut("Alt+D", "软删除当前笔记"),
             new Shortcut("Alt+Z", "撤销删除笔记"),
             new Shortcut("/", "斜杠快捷命令菜单")
         )));
         
-        // 🖱 多光标编辑
-        categories.add(new ShortcutCategory("多光标编辑", "🖱", List.of(
+        // 多光标编辑 - 青色
+        categories.add(new ShortcutCategory("多光标编辑", "#00BCD4", List.of(
             new Shortcut("Alt+Shift+↓", "向下添加光标"),
             new Shortcut("Alt+Shift+↑", "向上添加光标"),
             new Shortcut("Alt+拖动", "矩形选区"),
             new Shortcut("Esc", "退出多光标模式")
         )));
         
-        // ⚙ 系统功能
-        categories.add(new ShortcutCategory("系统功能", "⚙", List.of(
+        // 系统功能 - 灰色
+        categories.add(new ShortcutCategory("系统功能", "#909399", List.of(
             new Shortcut("Ctrl+,", "打开设置"),
             new Shortcut("Alt+S", "上传到云端"),
             new Shortcut("Alt+U", "从云端下载"),
