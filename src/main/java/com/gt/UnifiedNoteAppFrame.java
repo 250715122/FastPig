@@ -49,6 +49,7 @@ import org.apache.logging.log4j.Logger;
 public class UnifiedNoteAppFrame extends JFrame {
     
     private static final Logger logger = LogManager.getLogger(UnifiedNoteAppFrame.class);
+    private boolean translucencySupported = false; // 系统是否支持窗口半透明
     
     /**
      * 行号显示组件
@@ -251,6 +252,9 @@ public class UnifiedNoteAppFrame extends JFrame {
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setSize(1100, 720);
         setLocationRelativeTo(null);
+        
+        // 启用Per-Pixel Translucency以支持窗口透明度
+        enableWindowTranslucency();
         
         // 设置窗口图标
         setWindowIcon();
@@ -3712,18 +3716,46 @@ public class UnifiedNoteAppFrame extends JFrame {
     }
     
     /**
+     * 启用窗口半透明支持
+     */
+    private void enableWindowTranslucency() {
+        try {
+            // 检查系统是否支持Per-Pixel Translucency
+            GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
+            GraphicsDevice gd = ge.getDefaultScreenDevice();
+            
+            translucencySupported = gd.isWindowTranslucencySupported(
+                GraphicsDevice.WindowTranslucency.TRANSLUCENT);
+            
+            if (translucencySupported) {
+                // 设置窗口背景为完全透明，启用Per-Pixel Translucency
+                // 这必须在窗口可见之前调用
+                setBackground(new Color(0, 0, 0, 0));
+                logger.info("窗口半透明支持已启用");
+            } else {
+                logger.warn("系统不支持窗口半透明功能");
+            }
+        } catch (Exception e) {
+            logger.error("启用窗口半透明失败: {}", e.getMessage(), e);
+            translucencySupported = false;
+        }
+    }
+    
+    /**
      * 应用窗口透明度配置
      */
     private void applyWindowOpacity() {
+        if (!translucencySupported) {
+            logger.warn("系统不支持窗口半透明，跳过透明度设置");
+            return;
+        }
+        
         try {
             AppConfig config = AppConfig.getInstance();
             int opacityPercent = config.getWindowOpacity();
             float opacity = opacityPercent / 100.0f;
             setOpacity(opacity);
             logger.info("窗口透明度已设置为: {}%", opacityPercent);
-        } catch (IllegalComponentStateException e) {
-            // 装饰窗口不支持setOpacity，这是预期行为，静默处理
-            logger.warn("窗口透明度功能在装饰窗口模式下不可用");
         } catch (Exception e) {
             logger.error("设置窗口透明度失败: {}", e.getMessage(), e);
         }
@@ -3733,14 +3765,22 @@ public class UnifiedNoteAppFrame extends JFrame {
      * 更新窗口透明度（供设置面板实时预览使用）
      */
     public void updateOpacity(float opacity) {
+        if (!translucencySupported) {
+            return; // 不支持半透明，静默返回
+        }
+        
         try {
             setOpacity(opacity);
-        } catch (IllegalComponentStateException e) {
-            // 装饰窗口不支持setOpacity，不重复显示错误
-            // 已在applyWindowOpacity中记录警告
         } catch (Exception e) {
             logger.error("更新窗口透明度失败: {}", e.getMessage(), e);
         }
+    }
+    
+    /**
+     * 检查系统是否支持窗口半透明
+     */
+    public boolean isTranslucencySupported() {
+        return translucencySupported;
     }
     
     /**
@@ -3856,8 +3896,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         g2.setColor(new Color(0, 0, 0, 10));
         g2.fillRoundRect(x + 2, y + 2, width, height, 14, 14);
         
-        // 卡片背景 - 白色带30%透明度（alpha = 255 * 0.7 = 178）
-        g2.setColor(new Color(255, 255, 255, 178));
+        // 卡片背景 - 纯白色（窗口整体透明度由setOpacity控制）
+        g2.setColor(Color.WHITE);
         g2.fillRoundRect(x, y, width, height, 14, 14);
         
         // 卡片边框 - 更细腻的边框
