@@ -737,6 +737,9 @@ public class UnifiedNoteAppFrame extends JFrame {
         
         // 初始化 all 命令（生成所有命令的清单）
         initializeAllCommand();
+        
+        // 应用窗口透明度配置
+        applyWindowOpacity();
     }
 
     private boolean previewVisible = false;
@@ -3702,6 +3705,32 @@ public class UnifiedNoteAppFrame extends JFrame {
     private void openSettings() {
         SettingsDialog settingsDialog = new SettingsDialog(this);
         settingsDialog.setVisible(true);
+    }
+    
+    /**
+     * 应用窗口透明度配置
+     */
+    private void applyWindowOpacity() {
+        try {
+            AppConfig config = AppConfig.getInstance();
+            int opacityPercent = config.getWindowOpacity();
+            float opacity = opacityPercent / 100.0f;
+            setOpacity(opacity);
+            logger.info("窗口透明度已设置为: {}%", opacityPercent);
+        } catch (Exception e) {
+            logger.error("设置窗口透明度失败: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * 更新窗口透明度（供设置面板实时预览使用）
+     */
+    public void updateOpacity(float opacity) {
+        try {
+            setOpacity(opacity);
+        } catch (Exception e) {
+            logger.error("更新窗口透明度失败: {}", e.getMessage(), e);
+        }
     }
     
     /**

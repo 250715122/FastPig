@@ -41,6 +41,7 @@ public class AppConfig {
     public static final String UI_WINDOW_WIDTH = "ui.window.width";
     public static final String UI_WINDOW_HEIGHT = "ui.window.height";
     public static final String UI_START_MAXIMIZED = "ui.start.maximized";
+    public static final String UI_WINDOW_OPACITY = "ui.window.opacity";
     
     // 行为配置
     public static final String BEHAVIOR_SYNC_ON_START = "behavior.sync.on.start";
@@ -67,6 +68,7 @@ public class AppConfig {
         DEFAULTS.setProperty(UI_WINDOW_WIDTH, "1100");
         DEFAULTS.setProperty(UI_WINDOW_HEIGHT, "720");
         DEFAULTS.setProperty(UI_START_MAXIMIZED, "false");
+        DEFAULTS.setProperty(UI_WINDOW_OPACITY, "95");
         
         // 行为默认值
         DEFAULTS.setProperty(BEHAVIOR_SYNC_ON_START, "true");
@@ -305,6 +307,25 @@ public class AppConfig {
      */
     public String getConfigFilePath() {
         return configFilePath;
+    }
+    
+    // ===== 便捷方法：窗口透明度 =====
+    
+    /**
+     * 获取窗口透明度（0-100，100表示完全不透明）
+     */
+    public int getWindowOpacity() {
+        return getInt(UI_WINDOW_OPACITY, 95);
+    }
+    
+    /**
+     * 设置窗口透明度（0-100，100表示完全不透明）
+     */
+    public void setWindowOpacity(int opacity) {
+        if (opacity < 0 || opacity > 100) {
+            throw new IllegalArgumentException("透明度必须在 0-100 之间");
+        }
+        setInt(UI_WINDOW_OPACITY, opacity);
     }
 }
 
