@@ -36,6 +36,7 @@ public class ToastNotification extends JWindow {
     
     private final JFrame parentFrame;
     private Timer hideTimer;
+    private boolean isHiding = false; // 防止递归调用
     
     /**
      * 创建 Toast 通知
@@ -128,11 +129,21 @@ public class ToastNotification extends JWindow {
      * 隐藏通知
      */
     public void hide() {
-        if (hideTimer != null && hideTimer.isRunning()) {
-            hideTimer.stop();
+        // 防止递归调用
+        if (isHiding) {
+            return;
         }
-        setVisible(false);
-        dispose();
+        
+        isHiding = true;
+        try {
+            if (hideTimer != null && hideTimer.isRunning()) {
+                hideTimer.stop();
+            }
+            setVisible(false);
+            dispose();
+        } finally {
+            isHiding = false;
+        }
     }
     
     /**

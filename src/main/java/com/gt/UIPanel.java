@@ -54,7 +54,7 @@ public class UIPanel extends JPanel {
         add(Box.createVerticalStrut(25));
         
         // 窗口透明度
-        add(createSection("窗口透明度", "设置窗口透明度，可透视到桌面（拖动滑块实时预览）"));
+        add(createSection("窗口透明度", "设置窗口透明度（注意：装饰窗口模式下此功能不可用）"));
         
         // 透明度滑块和值标签的容器
         JPanel opacityPanel = new JPanel();
@@ -97,9 +97,9 @@ public class UIPanel extends JPanel {
         add(Box.createVerticalStrut(10));
         
         // 透明度说明
-        JLabel opacityNote = new JLabel("提示：透明度过低会影响内容可读性，建议保持在 70% 以上");
+        JLabel opacityNote = new JLabel("<html>提示：当前窗口使用装饰模式（有标题栏），透明度功能无法生效<br>如需透明度，需要切换到无边框模式（暂不支持）</html>");
         opacityNote.setFont(new Font("Microsoft YaHei UI", Font.ITALIC, 11));
-        opacityNote.setForeground(UIColors.TEXT_SECONDARY);
+        opacityNote.setForeground(UIColors.WARNING);
         opacityNote.setAlignmentX(LEFT_ALIGNMENT);
         add(opacityNote);
         

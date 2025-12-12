@@ -3721,6 +3721,9 @@ public class UnifiedNoteAppFrame extends JFrame {
             float opacity = opacityPercent / 100.0f;
             setOpacity(opacity);
             logger.info("窗口透明度已设置为: {}%", opacityPercent);
+        } catch (IllegalComponentStateException e) {
+            // 装饰窗口不支持setOpacity，这是预期行为，静默处理
+            logger.warn("窗口透明度功能在装饰窗口模式下不可用");
         } catch (Exception e) {
             logger.error("设置窗口透明度失败: {}", e.getMessage(), e);
         }
@@ -3732,6 +3735,9 @@ public class UnifiedNoteAppFrame extends JFrame {
     public void updateOpacity(float opacity) {
         try {
             setOpacity(opacity);
+        } catch (IllegalComponentStateException e) {
+            // 装饰窗口不支持setOpacity，不重复显示错误
+            // 已在applyWindowOpacity中记录警告
         } catch (Exception e) {
             logger.error("更新窗口透明度失败: {}", e.getMessage(), e);
         }
