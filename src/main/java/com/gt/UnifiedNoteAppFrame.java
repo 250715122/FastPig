@@ -206,21 +206,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             super.paintComponent(g);
             try{
                 if (getDocument().getLength()==0){
-                    Graphics2D g2 = (Graphics2D) g.create();
-                    g2.setColor(new Color(0,0,0,110));
-                    g2.setFont(getFont().deriveFont(Font.ITALIC));
-                    String[] hints = {
-                        "在此输入：快捷命令 空格 描述；",
-                        "这里写正文（Ctrl+S保存，Alt+P预览，Alt+D删除）"
-                    };
-                    FontMetrics fm = g2.getFontMetrics();
-                    int x = getInsets().left + 6;
-                    int y = getInsets().top + fm.getAscent() + 2;
-                    int lineHeight = fm.getHeight();
-                    for (int i = 0; i < hints.length; i++) {
-                        g2.drawString(hints[i], x, y + i * lineHeight);
-                    }
-                    g2.dispose();
+                    drawShortcutGuide(g);
                 }
             }catch(Exception ignored){}
         }
@@ -3716,6 +3702,91 @@ public class UnifiedNoteAppFrame extends JFrame {
     private void openSettings() {
         SettingsDialog settingsDialog = new SettingsDialog(this);
         settingsDialog.setVisible(true);
+    }
+    
+    /**
+     * 绘制快捷键指南（编辑区为空时显示）
+     */
+    private void drawShortcutGuide(Graphics g) {
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        
+        int width = bodyArea.getWidth();
+        int height = bodyArea.getHeight();
+        
+        // 标题
+        g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 24));
+        g2.setColor(UIColors.PRIMARY);
+        String title = "🐷 FastPig 快捷命令笔记管理";
+        FontMetrics titleFm = g2.getFontMetrics();
+        int titleX = (width - titleFm.stringWidth(title)) / 2;
+        int titleY = 60;
+        g2.drawString(title, titleX, titleY);
+        
+        // 副标题
+        g2.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+        g2.setColor(UIColors.TEXT_SECONDARY);
+        String subtitle = "开始输入以创建笔记，或使用以下快捷键提升效率";
+        FontMetrics subtitleFm = g2.getFontMetrics();
+        int subtitleX = (width - subtitleFm.stringWidth(subtitle)) / 2;
+        int subtitleY = titleY + 30;
+        g2.drawString(subtitle, subtitleX, subtitleY);
+        
+        // 获取快捷键数据
+        java.util.List<ShortcutData.ShortcutCategory> categories = ShortcutData.getCategories();
+        
+        // 根据宽度决定列数
+        int columns = width >= 1200 ? 3 : (width >= 800 ? 2 : 1);
+        int categoryWidth = (width - 100) / columns;
+        int startY = subtitleY + 50;
+        int currentX = 50;
+        int currentY = startY;
+        int maxYInColumn = startY;
+        
+        int categoryIndex = 0;
+        for (ShortcutData.ShortcutCategory category : categories) {
+            // 如果当前列放不下，换到下一列
+            int categoryHeight = 30 + category.shortcuts.size() * 22 + 15;
+            if (currentY + categoryHeight > height - 50 && categoryIndex > 0) {
+                // 换列
+                currentX += categoryWidth;
+                currentY = startY;
+                
+                // 如果换列后超出宽度，停止绘制
+                if (currentX + categoryWidth > width) {
+                    break;
+                }
+            }
+            
+            // 绘制分类标题
+            g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 14));
+            g2.setColor(UIColors.TEXT_PRIMARY);
+            String categoryTitle = category.icon + " " + category.name;
+            g2.drawString(categoryTitle, currentX, currentY);
+            currentY += 25;
+            
+            // 绘制快捷键列表
+            g2.setFont(new Font("Consolas", Font.PLAIN, 12));
+            for (ShortcutData.Shortcut shortcut : category.shortcuts) {
+                // 快捷键
+                g2.setColor(UIColors.PRIMARY);
+                g2.drawString(shortcut.keys, currentX + 10, currentY);
+                
+                // 描述
+                g2.setColor(UIColors.TEXT_PLACEHOLDER);
+                int descX = currentX + 10 + 120; // 快捷键固定宽度120
+                g2.drawString(shortcut.description, descX, currentY);
+                
+                currentY += 22;
+            }
+            
+            currentY += 15; // 分类间距
+            maxYInColumn = Math.max(maxYInColumn, currentY);
+            categoryIndex++;
+        }
+        
+        g2.dispose();
     }
 }
 
