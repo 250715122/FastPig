@@ -244,8 +244,8 @@ public class SettingsDialog extends JDialog {
     /**
      * 获取父窗口
      */
-    public JFrame getParentFrame() {
-        return parent;
+    public UnifiedNoteAppFrame getParentFrame() {
+        return (UnifiedNoteAppFrame) parent;
     }
     
     /**

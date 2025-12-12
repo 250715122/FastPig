@@ -43,8 +43,12 @@ import java.nio.file.StandardCopyOption;
 import org.scilab.forge.jlatexmath.TeXConstants;
 import org.scilab.forge.jlatexmath.TeXFormula;
 import org.scilab.forge.jlatexmath.TeXIcon;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class UnifiedNoteAppFrame extends JFrame {
+    
+    private static final Logger logger = LogManager.getLogger(UnifiedNoteAppFrame.class);
     
     /**
      * 行号显示组件
