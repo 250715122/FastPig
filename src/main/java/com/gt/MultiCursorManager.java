@@ -32,10 +32,10 @@ public class MultiCursorManager {
     
     public MultiCursorManager(JTextArea textArea) {
         this.textArea = textArea;
-        // 使用浅蓝色半透明作为光标标记
-        this.caretPainter = new DefaultHighlighter.DefaultHighlightPainter(new Color(100, 150, 255, 80));
-        // 使用浅灰色半透明作为矩形选区
-        this.rectangularPainter = new DefaultHighlighter.DefaultHighlightPainter(new Color(150, 150, 150, 60));
+        // 使用窄的竖线样式光标（2px宽）
+        this.caretPainter = new CaretHighlightPainter(UIColors.PRIMARY, 2);
+        // 使用统一的灰色半透明作为矩形选区
+        this.rectangularPainter = new DefaultHighlighter.DefaultHighlightPainter(UIColors.HIGHLIGHT_RECT_SELECTION);
     }
     
     /**

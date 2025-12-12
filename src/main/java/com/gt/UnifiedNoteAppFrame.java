@@ -225,14 +225,14 @@ public class UnifiedNoteAppFrame extends JFrame {
             }catch(Exception ignored){}
         }
     };
-    private final Highlighter.HighlightPainter firstLinePainter = new DefaultHighlighter.DefaultHighlightPainter(new Color(255,255,0,40));
+    private final Highlighter.HighlightPainter firstLinePainter = new DefaultHighlighter.DefaultHighlightPainter(UIColors.HIGHLIGHT_FIRST_LINE);
     private Object firstLineHighlightTag;
 
     // 页内搜索组件
     private JPanel searchPanel;
     private JTextField searchField;
     private JLabel searchResultLabel;
-    private final Highlighter.HighlightPainter searchHighlightPainter = new DefaultHighlighter.DefaultHighlightPainter(new Color(255,200,0,150));
+    private final Highlighter.HighlightPainter searchHighlightPainter = new DefaultHighlighter.DefaultHighlightPainter(UIColors.HIGHLIGHT_SEARCH);
     private final List<Object> searchHighlightTags = new ArrayList<>();
     private int currentSearchIndex = -1;
     private final List<Integer> searchMatchPositions = new ArrayList<>();
@@ -352,7 +352,16 @@ public class UnifiedNoteAppFrame extends JFrame {
 
         // 顶部栏移除
 
-        bodyArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
+        // 优化编辑器字体：使用等宽字体栈
+        Font editorFont = new Font("Consolas", Font.PLAIN, 14);
+        // 如果 Consolas 不可用，尝试其他等宽字体
+        if (!editorFont.getFamily().equals("Consolas")) {
+            editorFont = new Font("Monaco", Font.PLAIN, 14);
+        }
+        if (!editorFont.getFamily().equals("Monaco")) {
+            editorFont = new Font(Font.MONOSPACED, Font.PLAIN, 14);
+        }
+        bodyArea.setFont(editorFont);
 
         // 撤销/重做支持（Ctrl+Z / Ctrl+Y）
         final UndoManager undoManager = new UndoManager();
@@ -2497,22 +2506,20 @@ public class UnifiedNoteAppFrame extends JFrame {
     private void initSearchPanel() {
         searchPanel = new JPanel(new BorderLayout(8, 0));
         searchPanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(200, 200, 200)),
-            BorderFactory.createEmptyBorder(6, 8, 6, 8)
+            BorderFactory.createMatteBorder(1, 0, 0, 0, UIColors.BORDER_LIGHT),
+            BorderFactory.createEmptyBorder(8, 10, 8, 10)
         ));
-        searchPanel.setBackground(new Color(245, 245, 245));
+        searchPanel.setBackground(UIColors.BG_PANEL);
         
         JLabel searchLabel = new JLabel("查找:");
-        searchField = new JTextField(20);
-        searchResultLabel = new JLabel("");
+        searchLabel.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+        searchLabel.setForeground(UIColors.TEXT_PRIMARY);
+        searchField = UIComponents.createTextField(20);
+        searchResultLabel = UIComponents.createBadgeLabel("");
         
-        JButton prevBtn = new JButton("↑");
-        JButton nextBtn = new JButton("↓");
-        JButton closeBtn = new JButton("×");
-        
-        prevBtn.setMargin(new Insets(2, 8, 2, 8));
-        nextBtn.setMargin(new Insets(2, 8, 2, 8));
-        closeBtn.setMargin(new Insets(2, 8, 2, 8));
+        JButton prevBtn = UIComponents.createCompactButton("↑");
+        JButton nextBtn = UIComponents.createCompactButton("↓");
+        JButton closeBtn = UIComponents.createCloseButton();
         
         prevBtn.addActionListener(e -> findPrevious());
         nextBtn.addActionListener(e -> findNext());
@@ -2667,10 +2674,10 @@ public class UnifiedNoteAppFrame extends JFrame {
     private void initReplacePanel() {
         replacePanel = new JPanel(new BorderLayout(8, 0));
         replacePanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(200, 200, 200)),
-            BorderFactory.createEmptyBorder(8, 8, 8, 8)
+            BorderFactory.createMatteBorder(1, 0, 0, 0, UIColors.BORDER_LIGHT),
+            BorderFactory.createEmptyBorder(10, 10, 10, 10)
         ));
-        replacePanel.setBackground(new Color(245, 245, 245));
+        replacePanel.setBackground(UIColors.BG_PANEL);
         
         // 左侧面板：输入框和按钮
         JPanel leftPanel = new JPanel();
@@ -2678,17 +2685,17 @@ public class UnifiedNoteAppFrame extends JFrame {
         leftPanel.setOpaque(false);
         
         // 第一行：查找
-        JPanel findRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        JPanel findRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
         findRow.setOpaque(false);
         JLabel findLabel = new JLabel("查找:");
-        replaceFindField = new JTextField(25);
-        JButton findNextBtn = new JButton("下一个");
-        JButton findPrevBtn = new JButton("上一个");
+        findLabel.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+        findLabel.setForeground(UIColors.TEXT_PRIMARY);
+        replaceFindField = UIComponents.createTextField(25);
+        JButton findPrevBtn = UIComponents.createCompactButton("上一个");
+        JButton findNextBtn = UIComponents.createCompactButton("下一个");
         
-        findNextBtn.setMargin(new Insets(2, 8, 2, 8));
-        findPrevBtn.setMargin(new Insets(2, 8, 2, 8));
-        findNextBtn.addActionListener(e -> replaceFindNext());
         findPrevBtn.addActionListener(e -> replaceFindPrevious());
+        findNextBtn.addActionListener(e -> replaceFindNext());
         
         findRow.add(findLabel);
         findRow.add(replaceFindField);
@@ -2696,15 +2703,15 @@ public class UnifiedNoteAppFrame extends JFrame {
         findRow.add(findNextBtn);
         
         // 第二行：替换
-        JPanel replaceRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        JPanel replaceRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
         replaceRow.setOpaque(false);
         JLabel replaceLabel = new JLabel("替换:");
-        replaceWithField = new JTextField(25);
-        JButton replaceBtn = new JButton("替换");
-        JButton replaceAllBtn = new JButton("全部替换");
+        replaceLabel.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+        replaceLabel.setForeground(UIColors.TEXT_PRIMARY);
+        replaceWithField = UIComponents.createTextField(25);
+        JButton replaceBtn = UIComponents.createPrimaryButton("替换");
+        JButton replaceAllBtn = UIComponents.createPrimaryButton("全部替换");
         
-        replaceBtn.setMargin(new Insets(2, 8, 2, 8));
-        replaceAllBtn.setMargin(new Insets(2, 8, 2, 8));
         replaceBtn.addActionListener(e -> replaceCurrentMatch());
         replaceAllBtn.addActionListener(e -> replaceAllMatches());
         
@@ -2714,11 +2721,11 @@ public class UnifiedNoteAppFrame extends JFrame {
         replaceRow.add(replaceAllBtn);
         
         // 第三行：选项
-        JPanel optionsRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 20, 2));
+        JPanel optionsRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 20, 4));
         optionsRow.setOpaque(false);
-        replaceCaseSensitive = new JCheckBox("区分大小写");
-        replaceUseRegex = new JCheckBox("正则表达式");
-        replaceResultLabel = new JLabel("");
+        replaceCaseSensitive = UIComponents.createCheckBox("区分大小写");
+        replaceUseRegex = UIComponents.createCheckBox("正则表达式");
+        replaceResultLabel = UIComponents.createBadgeLabel("");
         
         optionsRow.add(replaceCaseSensitive);
         optionsRow.add(replaceUseRegex);
@@ -2729,8 +2736,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         leftPanel.add(optionsRow);
         
         // 右侧：关闭按钮
-        JButton closeBtn = new JButton("×");
-        closeBtn.setMargin(new Insets(2, 8, 2, 8));
+        JButton closeBtn = UIComponents.createCloseButton();
         closeBtn.addActionListener(e -> toggleReplacePanel());
         
         replacePanel.add(leftPanel, BorderLayout.CENTER);
@@ -3040,7 +3046,12 @@ public class UnifiedNoteAppFrame extends JFrame {
     private void initSelectionToolbar(){
         if (selectionToolbarInitialized) return;
         selectionToolbar = new JPopupMenu();
-        selectionToolbar.setBorder(BorderFactory.createLineBorder(new Color(200,200,200)));
+        // 美化边框：使用圆角和阴影效果
+        selectionToolbar.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(UIColors.BORDER_LIGHT, 1),
+            BorderFactory.createEmptyBorder(4, 4, 4, 4)
+        ));
+        selectionToolbar.setBackground(Color.WHITE);
         // 关键：工具条不抢焦点，避免打断 Shift+方向键的连续选择
         selectionToolbar.setFocusable(false);
 
@@ -3073,6 +3084,22 @@ public class UnifiedNoteAppFrame extends JFrame {
 
     private void addSelItem(JPopupMenu menu, String text, Runnable action){
         JMenuItem item = new JMenuItem(text);
+        item.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+        item.setForeground(UIColors.TEXT_PRIMARY);
+        item.setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
+        item.setOpaque(true);
+        item.setBackground(Color.WHITE);
+        // 添加悬停效果
+        item.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseEntered(java.awt.event.MouseEvent e) {
+                item.setBackground(UIColors.BG_HOVER);
+            }
+            @Override
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                item.setBackground(Color.WHITE);
+            }
+        });
         item.addActionListener(e -> { action.run(); bodyArea.requestFocusInWindow(); });
         menu.add(item);
     }
