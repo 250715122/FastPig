@@ -48,9 +48,18 @@ public class ToastNotification extends JWindow {
         super(parentFrame);
         this.parentFrame = parentFrame;
         
+        // 确保Toast窗口完全不透明，不受父窗口透明度影响
+        try {
+            setBackground(Color.WHITE); // 设置不透明背景
+            setOpacity(1.0f); // 确保完全不透明
+        } catch (Exception e) {
+            // 忽略异常，继续创建Toast
+        }
+        
         // 创建内容面板
         JPanel contentPanel = new JPanel(new BorderLayout(12, 0));
         contentPanel.setBackground(Color.WHITE);
+        contentPanel.setOpaque(true); // 确保面板不透明
         contentPanel.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(type.color, 2),
             BorderFactory.createEmptyBorder(12, 16, 12, 16)

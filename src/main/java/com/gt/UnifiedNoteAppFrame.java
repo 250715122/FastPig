@@ -49,7 +49,6 @@ import org.apache.logging.log4j.Logger;
 public class UnifiedNoteAppFrame extends JFrame {
     
     private static final Logger logger = LogManager.getLogger(UnifiedNoteAppFrame.class);
-    private boolean translucencySupported = false; // 系统是否支持窗口半透明
     
     /**
      * 行号显示组件
@@ -252,9 +251,6 @@ public class UnifiedNoteAppFrame extends JFrame {
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setSize(1100, 720);
         setLocationRelativeTo(null);
-        
-        // 启用Per-Pixel Translucency以支持窗口透明度
-        enableWindowTranslucency();
         
         // 设置窗口图标
         setWindowIcon();
@@ -745,9 +741,6 @@ public class UnifiedNoteAppFrame extends JFrame {
         
         // 初始化 all 命令（生成所有命令的清单）
         initializeAllCommand();
-        
-        // 应用窗口透明度配置
-        applyWindowOpacity();
     }
 
     private boolean previewVisible = false;
@@ -3363,12 +3356,12 @@ public class UnifiedNoteAppFrame extends JFrame {
                 return;
             }
 
-            // 弹窗选择
-            Object[] options = {"保留样式(转为Markdown)", "仅粘贴纯文本", "保留原始HTML(完整样式)", "取消"};
-            int defaultIdx = 0; // 默认“保留样式(转为Markdown)”
-            int opt = JOptionPane.showOptionDialog(this, "检测到富文本，如何粘贴？", "粘贴选项",
-                    JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[defaultIdx]);
-            if (opt == 3 || opt == JOptionPane.CLOSED_OPTION) return; // 取消
+            // 弹窗选择 - 支持键盘方向键导航
+            String[] options = {"保留样式(转为Markdown)", "仅粘贴纯文本", "保留原始HTML(完整样式)", "取消"};
+            int defaultIdx = 0; // 默认"保留样式(转为Markdown)"
+            int opt = PasteOptionDialog.showOptionDialog(this, "检测到富文本，如何粘贴？", "粘贴选项",
+                    options, defaultIdx);
+            if (opt == 3 || opt == -1) return; // 取消
             if (opt == 1){ // 纯文本
                 if (plain != null) bodyArea.replaceSelection(plain); else bodyArea.paste();
                 return;
@@ -3716,234 +3709,87 @@ public class UnifiedNoteAppFrame extends JFrame {
     }
     
     /**
-     * 启用窗口半透明支持
-     */
-    private void enableWindowTranslucency() {
-        try {
-            // 检查系统是否支持Per-Pixel Translucency
-            GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
-            GraphicsDevice gd = ge.getDefaultScreenDevice();
-            
-            translucencySupported = gd.isWindowTranslucencySupported(
-                GraphicsDevice.WindowTranslucency.TRANSLUCENT);
-            
-            if (translucencySupported) {
-                // 设置窗口背景为完全透明，启用Per-Pixel Translucency
-                // 这必须在窗口可见之前调用
-                setBackground(new Color(0, 0, 0, 0));
-                logger.info("窗口半透明支持已启用");
-            } else {
-                logger.warn("系统不支持窗口半透明功能");
-            }
-        } catch (Exception e) {
-            logger.error("启用窗口半透明失败: {}", e.getMessage(), e);
-            translucencySupported = false;
-        }
-    }
-    
-    /**
-     * 应用窗口透明度配置
-     */
-    private void applyWindowOpacity() {
-        if (!translucencySupported) {
-            logger.warn("系统不支持窗口半透明，跳过透明度设置");
-            return;
-        }
-        
-        try {
-            AppConfig config = AppConfig.getInstance();
-            int opacityPercent = config.getWindowOpacity();
-            float opacity = opacityPercent / 100.0f;
-            setOpacity(opacity);
-            logger.info("窗口透明度已设置为: {}%", opacityPercent);
-        } catch (Exception e) {
-            logger.error("设置窗口透明度失败: {}", e.getMessage(), e);
-        }
-    }
-    
-    /**
-     * 更新窗口透明度（供设置面板实时预览使用）
-     */
-    public void updateOpacity(float opacity) {
-        if (!translucencySupported) {
-            return; // 不支持半透明，静默返回
-        }
-        
-        try {
-            setOpacity(opacity);
-        } catch (Exception e) {
-            logger.error("更新窗口透明度失败: {}", e.getMessage(), e);
-        }
-    }
-    
-    /**
-     * 检查系统是否支持窗口半透明
-     */
-    public boolean isTranslucencySupported() {
-        return translucencySupported;
-    }
-    
-    /**
-     * 绘制快捷键指南（编辑区为空时显示）- 2x2网格布局
+     * 绘制快捷键指南（编辑区为空时显示）- 简洁网格风格
      */
     private void drawShortcutGuide(Graphics g) {
         Graphics2D g2 = (Graphics2D) g.create();
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         
         int width = bodyArea.getWidth();
         int height = bodyArea.getHeight();
         
-        // 标题 - 简化为"FastPig（迅猪）"
-        g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 36));
-        String title = "FastPig（迅猪）";
-        FontMetrics titleFm = g2.getFontMetrics();
-        int titleX = (width - titleFm.stringWidth(title)) / 2;
-        int titleY = 70;
-        
-        // 标题阴影
-        g2.setColor(new Color(64, 158, 255, 40));
-        g2.drawString(title, titleX + 2, titleY + 2);
-        
-        // 标题文字 - 使用渐变效果的蓝色
-        g2.setColor(new Color(54, 142, 230));
-        g2.drawString(title, titleX, titleY);
-        
         // 获取快捷键数据
         java.util.List<ShortcutData.ShortcutCategory> categories = ShortcutData.getCategories();
         
-        // 固定 2x2 网格布局
+        // 2x2网格布局
         int cols = 2;
         int rows = 2;
-        int gapX = 40; // 水平间距增大
-        int gapY = 30; // 垂直间距增大
-        int margin = 80; // 左右边距增大
+        int gapX = 120; // 水平间距
+        int gapY = 90;  // 垂直间距
         
-        int cardWidth = (width - margin * 2 - gapX) / cols;
-        int cardHeight = 230; // 固定高度增大
+        int areaWidth = 350; // 固定区域宽度
+        int areaHeight = 220; // 调整区域高度以更好居中
         
-        int startX = margin;
-        int startY = titleY + 60;
+        // 计算整体宽度和高度，实现居中
+        int totalWidth = areaWidth * cols + gapX;
+        int totalHeight = areaHeight * rows + gapY * (rows - 1);
         
-        // 绘制4个核心分类卡片
+        int startX = (width - totalWidth) / 2;  // 水平居中
+        int startY = (height - totalHeight) / 2 + 20; // 垂直居中，略微下移
+        
+        // 绘制4个分类区域
         for (int i = 0; i < Math.min(4, categories.size()); i++) {
             int col = i % 2;
             int row = i / 2;
-            int x = startX + col * (cardWidth + gapX);
-            int y = startY + row * (cardHeight + gapY);
+            int x = startX + col * (areaWidth + gapX);
+            int y = startY + row * (areaHeight + gapY);
             
-            drawCategoryWithIcon(g2, x, y, cardWidth, cardHeight, categories.get(i));
-        }
-        
-        // 底部提示 - 更醒目的样式
-        if (height > 600) {
-            int bottomY = startY + rows * cardHeight + (rows - 1) * gapY + 40;
-            
-            g2.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
-            g2.setColor(new Color(130, 135, 140));
-            String hint = "按 Ctrl+, 查看所有快捷键设置";
-            FontMetrics hintFm = g2.getFontMetrics();
-            int hintX = (width - hintFm.stringWidth(hint)) / 2;
-            g2.drawString(hint, hintX, bottomY);
+            drawSimpleCategory(g2, x, y, areaWidth, categories.get(i));
         }
         
         g2.dispose();
     }
     
     /**
-     * 绘制带彩色图标的分类卡片
+     * 绘制简洁风格的分类区域（无背景，仅分隔线）
      */
-    private void drawCategoryWithIcon(Graphics2D g2, int x, int y, int width, int height, 
-                                      ShortcutData.ShortcutCategory category) {
-        // 绘制卡片背景
-        drawCategoryCard(g2, x, y, width, height);
+    private void drawSimpleCategory(Graphics2D g2, int x, int y, int width, 
+                                    ShortcutData.ShortcutCategory category) {
+        int currentY = y;
         
-        // 绘制分类标题（不带图标）
-        g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 16));
-        g2.setColor(UIColors.TEXT_PRIMARY);
-        g2.drawString(category.name, x + 20, y + 30);
+        // 分类标题文字 - 深灰色，加粗
+        g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 15));
+        g2.setColor(new Color(60, 65, 70));
+        g2.drawString(category.name, x, currentY);
         
-        // 绘制分割线
-        g2.setColor(new Color(225, 230, 235));
-        g2.setStroke(new java.awt.BasicStroke(1.2f));
-        g2.drawLine(x + 20, y + 48, x + width - 20, y + 48);
-        g2.setStroke(new java.awt.BasicStroke(1.0f));
+        currentY += 8;
         
-        // 绘制快捷键列表
-        int listY = y + 75;
-        for (ShortcutData.Shortcut shortcut : category.shortcuts) {
-            // 绘制快捷键徽章
-            drawKeyBadge(g2, x + 20, listY - 14, shortcut.keys);
-            
-            // 绘制描述
-            g2.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
-            g2.setColor(new Color(85, 90, 95));
-            int descX = x + 155;
-            g2.drawString(shortcut.description, descX, listY);
-            
-            listY += 26;
-        }
-    }
-    
-    /**
-     * 绘制分类卡片背景
-     */
-    private void drawCategoryCard(Graphics2D g2, int x, int y, int width, int height) {
-        // 多层阴影效果
-        g2.setColor(new Color(0, 0, 0, 6));
-        g2.fillRoundRect(x + 4, y + 4, width, height, 14, 14);
-        g2.setColor(new Color(0, 0, 0, 10));
-        g2.fillRoundRect(x + 2, y + 2, width, height, 14, 14);
-        
-        // 卡片背景 - 纯白色（窗口整体透明度由setOpacity控制）
-        g2.setColor(Color.WHITE);
-        g2.fillRoundRect(x, y, width, height, 14, 14);
-        
-        // 卡片边框 - 更细腻的边框
+        // 绘制分隔线 - 浅灰色细线
         g2.setColor(new Color(220, 225, 230));
-        g2.setStroke(new java.awt.BasicStroke(1.5f));
-        g2.drawRoundRect(x, y, width, height, 14, 14);
         g2.setStroke(new java.awt.BasicStroke(1.0f));
-    }
-    
-    /**
-     * 绘制快捷键徽章
-     */
-    private void drawKeyBadge(Graphics2D g2, int x, int y, String keys) {
-        // 使用更大的字体
-        g2.setFont(new Font("Consolas", Font.BOLD, 12));
-        FontMetrics fm = g2.getFontMetrics();
-        int keyWidth = fm.stringWidth(keys);
-        int keyHeight = fm.getHeight();
+        g2.drawLine(x, currentY, x + width, currentY);
         
-        // 内边距
-        int badgeWidth = keyWidth + 18;
-        int badgeHeight = keyHeight + 7;
+        currentY += 30;
         
-        // 徽章阴影
-        g2.setColor(new Color(0, 0, 0, 18));
-        g2.fillRoundRect(x + 2, y + 2, badgeWidth, badgeHeight, 5, 5);
+        // 快捷键固定宽度
+        int keyColumnWidth = 130;
         
-        // 徽章背景 - 渐变效果（模拟）
-        GradientPaint gradient = new GradientPaint(
-            x, y, new Color(250, 251, 252),
-            x, y + badgeHeight, new Color(242, 244, 247)
-        );
-        g2.setPaint(gradient);
-        g2.fillRoundRect(x, y, badgeWidth, badgeHeight, 5, 5);
-        
-        // 徽章边框 - 双层边框效果
-        g2.setColor(new Color(200, 210, 220));
-        g2.setStroke(new java.awt.BasicStroke(1.3f));
-        g2.drawRoundRect(x, y, badgeWidth, badgeHeight, 5, 5);
-        g2.setStroke(new java.awt.BasicStroke(1.0f));
-        
-        // 徽章文字 - 深蓝色
-        g2.setColor(new Color(45, 125, 210));
-        int textX = x + 9;
-        int textY = y + badgeHeight - 8;
-        g2.drawString(keys, textX, textY);
+        // 快捷键列表 - 固定宽度对齐
+        for (ShortcutData.Shortcut shortcut : category.shortcuts) {
+            // 快捷键 - Consolas字体，中等蓝色
+            g2.setFont(new Font("Consolas", Font.PLAIN, 13));
+            g2.setColor(new Color(64, 128, 200));
+            g2.drawString(shortcut.keys, x, currentY);
+            
+            // 描述 - 微软雅黑，浅灰色，从固定位置开始
+            g2.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+            g2.setColor(new Color(115, 120, 125));
+            int descX = x + keyColumnWidth; // 固定列宽
+            g2.drawString(shortcut.description, descX, currentY);
+            
+            currentY += 28;
+        }
     }
 }
 

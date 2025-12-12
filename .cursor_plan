@@ -1,0 +1,62 @@
+# 实施方案C：简洁网格风格
+
+## 设计效果
+
+```
+编辑操作                          格式化
+Ctrl+S 保存   Ctrl+F 查找        Ctrl+B 加粗      Tab 缩进
+Ctrl+Z 撤销   Ctrl+R 替换        Ctrl+1-5 标题    Ctrl+E 工具条
+Alt+D 删除    / 快捷菜单          Alt+Shift+↑↓ 多光标
+
+视图切换                          系统功能
+Alt+P 预览    Alt+F 全屏         Ctrl+, 设置      Alt+S 上传
+Alt+T 目录    Ctrl+Home 顶部     Alt+U 下载       Alt+Z 撤销删除
+Ctrl+L 首行   Esc 关闭面板       Alt+Q 退出       Alt+M 最大化
+```
+
+## 样式特点
+
+- 无边框、无阴影、无背景色
+- 直接在编辑器灰色背景上绘制文字
+- 2x2区域划分（左上、右上、左下、右下）
+- 每个区域有分类标题
+- 快捷键横向排列，每行显示多个
+- 使用等宽字体对齐快捷键
+- 颜色简洁：深灰色标题，蓝色快捷键，灰色描述
+
+## 实施步骤
+
+### 1. 修改 UnifiedNoteAppFrame.java 的 drawShortcutGuide() 方法
+
+**删除**：
+- 大标题"FastPig（迅猪）"
+- 所有卡片绘制代码
+- drawCategoryCard() 方法调用
+- drawCategoryWithIcon() 方法
+- drawKeyBadge() 方法
+
+**新增**：
+- 简单的文本绘制
+- 2x2区域布局计算
+- 横向快捷键排列逻辑
+- 每个快捷键格式："快捷键 描述"
+
+### 2. 布局参数
+
+- 左边距：80px
+- 顶部起始：100px（无大标题）
+- 区域宽度：各占窗口宽度的一半（减去边距和间距）
+- 区域高度：自适应内容
+- 行间距：22px
+- 列间距：40px
+
+### 3. 删除辅助方法
+
+可以删除：
+- drawCategoryCard()
+- drawCategoryWithIcon()  
+- drawKeyBadge()
+
+这些方法在新设计中不再需要
+
+
