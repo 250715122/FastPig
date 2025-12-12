@@ -3731,15 +3731,6 @@ public class UnifiedNoteAppFrame extends JFrame {
         g2.setColor(new Color(54, 142, 230));
         g2.drawString(title, titleX, titleY);
         
-        // 副标题
-        g2.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 14));
-        g2.setColor(new Color(120, 125, 130));
-        String subtitle = "开始输入以创建笔记，使用快捷键提升效率";
-        FontMetrics subtitleFm = g2.getFontMetrics();
-        int subtitleX = (width - subtitleFm.stringWidth(subtitle)) / 2;
-        int subtitleY = titleY + 42;
-        g2.drawString(subtitle, subtitleX, subtitleY);
-        
         // 获取快捷键数据
         java.util.List<ShortcutData.ShortcutCategory> categories = ShortcutData.getCategories();
         
@@ -3754,7 +3745,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         int cardHeight = 230; // 固定高度增大
         
         int startX = margin;
-        int startY = subtitleY + 60;
+        int startY = titleY + 60;
         
         // 绘制4个核心分类卡片
         for (int i = 0; i < Math.min(4, categories.size()); i++) {
@@ -3789,39 +3780,10 @@ public class UnifiedNoteAppFrame extends JFrame {
         // 绘制卡片背景
         drawCategoryCard(g2, x, y, width, height);
         
-        // 解析图标颜色（从 icon 字段获取颜色代码）
-        Color iconColor;
-        try {
-            iconColor = Color.decode(category.icon);
-        } catch (Exception e) {
-            iconColor = UIColors.PRIMARY;
-        }
-        
-        // 绘制彩色圆点图标 - 增大尺寸
-        int iconX = x + 20;
-        int iconY = y + 18;
-        int iconSize = 16; // 从10px增大到16px
-        
-        // 圆点外圈（边框效果）
-        g2.setColor(new Color(iconColor.getRed(), iconColor.getGreen(), iconColor.getBlue(), 60));
-        g2.fillOval(iconX - 2, iconY - 2, iconSize + 4, iconSize + 4);
-        
-        // 圆点阴影
-        g2.setColor(new Color(0, 0, 0, 30));
-        g2.fillOval(iconX + 2, iconY + 2, iconSize, iconSize);
-        
-        // 圆点本体
-        g2.setColor(iconColor);
-        g2.fillOval(iconX, iconY, iconSize, iconSize);
-        
-        // 圆点高光
-        g2.setColor(new Color(255, 255, 255, 150));
-        g2.fillOval(iconX + 3, iconY + 3, iconSize / 2, iconSize / 2);
-        
-        // 绘制分类标题
+        // 绘制分类标题（不带图标）
         g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 16));
         g2.setColor(UIColors.TEXT_PRIMARY);
-        g2.drawString(category.name, x + 45, y + 30);
+        g2.drawString(category.name, x + 20, y + 30);
         
         // 绘制分割线
         g2.setColor(new Color(225, 230, 235));
@@ -3855,8 +3817,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         g2.setColor(new Color(0, 0, 0, 10));
         g2.fillRoundRect(x + 2, y + 2, width, height, 14, 14);
         
-        // 卡片背景 - 纯白色
-        g2.setColor(Color.WHITE);
+        // 卡片背景 - 白色带30%透明度（alpha = 255 * 0.7 = 178）
+        g2.setColor(new Color(255, 255, 255, 178));
         g2.fillRoundRect(x, y, width, height, 14, 14);
         
         // 卡片边框 - 更细腻的边框
