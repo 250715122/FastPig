@@ -3716,13 +3716,20 @@ public class UnifiedNoteAppFrame extends JFrame {
         int width = bodyArea.getWidth();
         int height = bodyArea.getHeight();
         
-        // 标题
-        g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 28));
+        // 标题 - 使用更大的emoji和优化的标题
+        g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 32));
         g2.setColor(UIColors.PRIMARY);
-        String title = "🐷 FastPig 快捷命令笔记管理";
+        String title = "🐷 FastPig（迅猪）快捷知识管理";
         FontMetrics titleFm = g2.getFontMetrics();
         int titleX = (width - titleFm.stringWidth(title)) / 2;
         int titleY = 70;
+        
+        // 添加标题阴影效果
+        g2.setColor(new Color(64, 158, 255, 30));
+        g2.drawString(title, titleX + 2, titleY + 2);
+        
+        // 绘制标题
+        g2.setColor(UIColors.PRIMARY);
         g2.drawString(title, titleX, titleY);
         
         // 副标题
@@ -3765,8 +3772,8 @@ public class UnifiedNoteAppFrame extends JFrame {
             // 绘制卡片背景
             drawCategoryCard(g2, currentX, currentY - 10, categoryWidth, categoryHeight);
             
-            // 绘制分类标题
-            g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 15));
+            // 绘制分类标题 - 增大图标和字体
+            g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 16));
             g2.setColor(UIColors.TEXT_PRIMARY);
             String categoryTitle = category.icon + "  " + category.name;
             g2.drawString(categoryTitle, currentX + 15, currentY + 15);
@@ -3780,12 +3787,12 @@ public class UnifiedNoteAppFrame extends JFrame {
             // 绘制快捷键列表
             for (ShortcutData.Shortcut shortcut : category.shortcuts) {
                 // 绘制快捷键徽章
-                drawKeyBadge(g2, currentX + 15, currentY - 13, shortcut.keys);
+                drawKeyBadge(g2, currentX + 15, currentY - 14, shortcut.keys);
                 
-                // 绘制描述（使用支持中文的字体）
+                // 绘制描述（使用支持中文的字体）- 优化对齐
                 g2.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
-                g2.setColor(UIColors.TEXT_SECONDARY);
-                int descX = currentX + 135;
+                g2.setColor(new Color(96, 98, 102));
+                int descX = currentX + 145; // 增加间距以适应更大的徽章
                 g2.drawString(shortcut.description, descX, currentY);
                 
                 currentY += 28;
@@ -3813,16 +3820,16 @@ public class UnifiedNoteAppFrame extends JFrame {
      * 绘制分类卡片背景
      */
     private void drawCategoryCard(Graphics2D g2, int x, int y, int width, int height) {
-        // 卡片阴影
-        g2.setColor(new Color(0, 0, 0, 8));
-        g2.fillRoundRect(x + 2, y + 2, width, height, 12, 12);
+        // 卡片阴影 - 增强阴影效果
+        g2.setColor(new Color(0, 0, 0, 12));
+        g2.fillRoundRect(x + 3, y + 3, width, height, 12, 12);
         
-        // 卡片背景
-        g2.setColor(new Color(248, 250, 252));
+        // 卡片背景 - 使用更浅的色调
+        g2.setColor(new Color(252, 253, 254));
         g2.fillRoundRect(x, y, width, height, 12, 12);
         
-        // 卡片边框
-        g2.setColor(UIColors.BORDER_LIGHT);
+        // 卡片边框 - 使用更柔和的边框
+        g2.setColor(new Color(230, 235, 240));
         g2.drawRoundRect(x, y, width, height, 12, 12);
     }
     
@@ -3830,30 +3837,34 @@ public class UnifiedNoteAppFrame extends JFrame {
      * 绘制快捷键徽章
      */
     private void drawKeyBadge(Graphics2D g2, int x, int y, String keys) {
-        g2.setFont(new Font("Consolas", Font.BOLD, 12));
+        // 使用更大的字体
+        g2.setFont(new Font("Consolas", Font.BOLD, 13));
         FontMetrics fm = g2.getFontMetrics();
         int keyWidth = fm.stringWidth(keys);
         int keyHeight = fm.getHeight();
         
-        int badgeWidth = keyWidth + 16;
-        int badgeHeight = keyHeight + 6;
+        // 增加内边距
+        int badgeWidth = keyWidth + 20;
+        int badgeHeight = keyHeight + 8;
         
-        // 徽章阴影
-        g2.setColor(new Color(0, 0, 0, 15));
-        g2.fillRoundRect(x + 1, y + 1, badgeWidth, badgeHeight, 6, 6);
+        // 徽章阴影 - 更明显的阴影
+        g2.setColor(new Color(0, 0, 0, 20));
+        g2.fillRoundRect(x + 2, y + 2, badgeWidth, badgeHeight, 6, 6);
         
-        // 徽章背景
-        g2.setColor(new Color(240, 242, 245));
+        // 徽章背景 - 更浅的背景
+        g2.setColor(new Color(245, 247, 250));
         g2.fillRoundRect(x, y, badgeWidth, badgeHeight, 6, 6);
         
-        // 徽章边框
-        g2.setColor(new Color(200, 205, 210));
+        // 徽章边框 - 更粗更明显的边框
+        g2.setColor(new Color(180, 190, 200));
+        g2.setStroke(new java.awt.BasicStroke(1.5f));
         g2.drawRoundRect(x, y, badgeWidth, badgeHeight, 6, 6);
+        g2.setStroke(new java.awt.BasicStroke(1.0f)); // 恢复默认线宽
         
-        // 徽章文字
-        g2.setColor(UIColors.PRIMARY);
-        int textX = x + 8;
-        int textY = y + badgeHeight - 8;
+        // 徽章文字 - 使用更鲜明的蓝色
+        g2.setColor(new Color(54, 142, 230));
+        int textX = x + 10;
+        int textY = y + badgeHeight - 9;
         g2.drawString(keys, textX, textY);
     }
 }
