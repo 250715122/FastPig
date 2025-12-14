@@ -1548,9 +1548,25 @@ public class UnifiedNoteAppFrame extends JFrame {
         
         String[] lines = md.split("\n", -1);
         java.util.regex.Pattern headingPattern = java.util.regex.Pattern.compile("^(#{1,6})\\s+(.+?)(?:\\s*\\{#([A-Za-z0-9_-]+)\\})?\\s*$");
+        java.util.regex.Pattern codeBlockPattern = java.util.regex.Pattern.compile("^```"); // 匹配代码块分隔符
+        
+        boolean inCodeBlock = false; // 跟踪是否在代码块内
         
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i];
+            
+            // 检查是否进入/退出代码块
+            if (codeBlockPattern.matcher(line.trim()).find()) {
+                inCodeBlock = !inCodeBlock;
+                continue; // 跳过代码块分隔符行
+            }
+            
+            // 在代码块内，跳过标题匹配
+            if (inCodeBlock) {
+                continue;
+            }
+            
+            // 正常的标题匹配逻辑
             java.util.regex.Matcher matcher = headingPattern.matcher(line);
             if (matcher.find()) {
                 String hashes = matcher.group(1);
