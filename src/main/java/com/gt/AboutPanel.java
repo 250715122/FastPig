@@ -14,7 +14,7 @@ public class AboutPanel extends JPanel {
         this.parent = parent;
         
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-        setBackground(Color.WHITE);
+        setBackground(UIColors.BG_PRIMARY);
         
         initializeComponents();
     }

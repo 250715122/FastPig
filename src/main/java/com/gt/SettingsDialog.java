@@ -44,6 +44,9 @@ public class SettingsDialog extends JDialog {
         bindEvents();
         loadConfiguration();
         
+        // 应用当前主题
+        applyTheme();
+        
         setSize(900, 600);
         setLocationRelativeTo(parent);
         setResizable(false);
@@ -127,15 +130,16 @@ public class SettingsDialog extends JDialog {
         leftScrollPane.setPreferredSize(new Dimension(180, 0));
         leftScrollPane.setBorder(null);
         leftScrollPane.setBackground(UIColors.BG_SECONDARY);
+        leftScrollPane.getViewport().setBackground(UIColors.BG_SECONDARY);
         
         // 右侧内容面板
-        contentPanel.setBackground(Color.WHITE);
+        contentPanel.setBackground(UIColors.BG_PRIMARY);
         contentPanel.setBorder(new EmptyBorder(20, 20, 20, 20));
         
         // 底部按钮面板
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10));
         buttonPanel.setBackground(UIColors.BG_SECONDARY);
-        buttonPanel.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, UIColors.BORDER_LIGHT));
+        buttonPanel.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, UIColors.BORDER_BASE));
         buttonPanel.add(applyButton);
         buttonPanel.add(cancelButton);
         buttonPanel.add(saveButton);
@@ -253,6 +257,71 @@ public class SettingsDialog extends JDialog {
      */
     public AppConfig getConfig() {
         return config;
+    }
+    
+    /**
+     * 应用主题到对话框
+     */
+    public void applyTheme() {
+        ThemeManager themeManager = ThemeManager.getInstance();
+        
+        // 应用对话框背景
+        getContentPane().setBackground(UIColors.BG_PRIMARY);
+        
+        // 应用分类列表主题
+        categoryList.setBackground(UIColors.BG_SECONDARY);
+        categoryList.repaint();
+        
+        // 遍历所有组件，更新左侧面板、内容面板、底部按钮面板
+        for (Component comp : getContentPane().getComponents()) {
+            if (comp instanceof JScrollPane) {
+                // 左侧滚动面板
+                JScrollPane scrollPane = (JScrollPane) comp;
+                scrollPane.setBackground(UIColors.BG_SECONDARY);
+                scrollPane.getViewport().setBackground(UIColors.BG_SECONDARY);
+            } else if (comp instanceof JPanel) {
+                JPanel panel = (JPanel) comp;
+                
+                // 判断是内容面板还是按钮面板
+                if (panel == contentPanel) {
+                    // 内容面板
+                    contentPanel.setBackground(UIColors.BG_PRIMARY);
+                } else {
+                    // 按钮面板
+                    panel.setBackground(UIColors.BG_SECONDARY);
+                    panel.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, UIColors.BORDER_BASE));
+                }
+            }
+        }
+        
+        // 应用内容面板主题
+        themeManager.applyTheme(contentPanel);
+        
+        // 应用各个配置面板主题
+        if (cloudSyncPanel != null) {
+            cloudSyncPanel.setBackground(UIColors.BG_PRIMARY);
+            themeManager.applyTheme(cloudSyncPanel);
+        }
+        if (editorPanel != null) {
+            editorPanel.setBackground(UIColors.BG_PRIMARY);
+            themeManager.applyTheme(editorPanel);
+        }
+        if (uiPanel != null) {
+            uiPanel.setBackground(UIColors.BG_PRIMARY);
+            themeManager.applyTheme(uiPanel);
+        }
+        if (shortcutsPanel != null) {
+            shortcutsPanel.setBackground(UIColors.BG_PRIMARY);
+            themeManager.applyTheme(shortcutsPanel);
+        }
+        if (aboutPanel != null) {
+            aboutPanel.setBackground(UIColors.BG_PRIMARY);
+            themeManager.applyTheme(aboutPanel);
+        }
+        
+        // 重绘对话框
+        repaint();
+        revalidate();
     }
 }
 

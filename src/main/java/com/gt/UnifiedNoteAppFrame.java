@@ -59,8 +59,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         
         public LineNumberComponent() {
             setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
-            setBackground(new Color(240, 240, 240));
-            setForeground(new Color(128, 128, 128));
+            setBackground(UIColors.LINE_NUMBER_BG);
+            setForeground(UIColors.LINE_NUMBER_TEXT);
             setOpaque(true);
             
             // 监听文档变化，实时更新行号显示
@@ -252,6 +252,16 @@ public class UnifiedNoteAppFrame extends JFrame {
         setSize(1100, 720);
         setLocationRelativeTo(null);
         
+        // 应用当前主题
+        ThemeManager themeManager = ThemeManager.getInstance();
+        bodyArea.setBackground(themeManager.getColor("editor.background"));
+        bodyArea.setForeground(themeManager.getColor("editor.foreground"));
+        bodyArea.setCaretColor(themeManager.getColor("editor.caret"));
+        bodyArea.setSelectionColor(themeManager.getColor("editor.selection"));
+        
+        // 设置窗口背景色
+        getContentPane().setBackground(UIColors.BG_PRIMARY);
+        
         // 设置窗口图标
         setWindowIcon();
         
@@ -384,8 +394,11 @@ public class UnifiedNoteAppFrame extends JFrame {
         bodyScrollPane = new JScrollPane(bodyArea);
         
         // 添加行号显示组件到 JScrollPane 的左侧行头
-        LineNumberComponent lineNumberComponent = new LineNumberComponent();
+        lineNumberComponent = new LineNumberComponent();
         bodyScrollPane.setRowHeaderView(lineNumberComponent);
+        
+        // 应用初始主题到滚动面板
+        applyScrollPaneTheme(bodyScrollPane);
         
         // 首行高亮：随内容变化动态更新
         bodyArea.getDocument().addDocumentListener(new javax.swing.event.DocumentListener(){
@@ -396,8 +409,11 @@ public class UnifiedNoteAppFrame extends JFrame {
 
         // 底部状态栏
         statusLeft = new JLabel("就绪");
+        statusLeft.setForeground(UIColors.TEXT_PRIMARY);
         statusRight = new JLabel("");
+        statusRight.setForeground(UIColors.TEXT_SECONDARY);
         statusBar = new JPanel(new BorderLayout(8, 0));
+        statusBar.setBackground(UIColors.BG_PRIMARY);
         statusBar.setBorder(BorderFactory.createEmptyBorder(4,8,4,8));
         statusBar.add(statusLeft, BorderLayout.WEST);
         statusBar.add(statusRight, BorderLayout.EAST);
@@ -412,11 +428,12 @@ public class UnifiedNoteAppFrame extends JFrame {
         multiCursorManager = new MultiCursorManager(bodyArea);
         multiCursorManager.install();
 
-        editorPanel = new JPanel(new BorderLayout(8, 8));
+        editorPanel = new JPanel(new BorderLayout());
+        editorPanel.setBackground(UIColors.BG_PRIMARY);
         editorPanel.add(bodyScrollPane, BorderLayout.CENTER);
         editorPanel.add(statusBar, BorderLayout.SOUTH);
 
-        setLayout(new BorderLayout(8, 8));
+        setLayout(new BorderLayout());
         add(editorPanel, BorderLayout.CENTER);
         centerComponent = editorPanel;
         ACTIVE = this;
@@ -750,6 +767,7 @@ public class UnifiedNoteAppFrame extends JFrame {
     private JScrollPane htmlScrollPane; // 右侧预览区的滚动面板，用于滚动同步
     private javax.swing.Timer previewTimer;
     private JScrollPane bodyScrollPane;
+    private LineNumberComponent lineNumberComponent; // 行号组件
     
     // 目录面板相关
     private boolean tocVisible = false; // 预览模式下目录面板默认隐藏
@@ -860,6 +878,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             JScrollPane leftScrollPane = new JScrollPane(bodyArea);
             LineNumberComponent lineNumber = new LineNumberComponent();
             leftScrollPane.setRowHeaderView(lineNumber);
+            applyScrollPaneTheme(leftScrollPane);
             
             // 重新创建目录和预览的分割面板（内层）
             previewWithTocSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
@@ -971,7 +990,8 @@ public class UnifiedNoteAppFrame extends JFrame {
                     editWithTocSplit.setResizeWeight(1.0); // 编辑区占据大部分空间
                     
                     // 创建包含分割面板和状态栏的面板
-                    JPanel containerPanel = new JPanel(new BorderLayout(8, 8));
+                    JPanel containerPanel = new JPanel(new BorderLayout());
+                    containerPanel.setBackground(UIColors.BG_PRIMARY);
                     containerPanel.add(editWithTocSplit, BorderLayout.CENTER);
                     containerPanel.add(statusBar, BorderLayout.SOUTH);
                     
@@ -1065,6 +1085,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         tocList = new JList<>(tocModel);
         tocList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         tocList.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+        tocList.setBackground(UIColors.BG_PRIMARY);
+        tocList.setForeground(UIColors.TEXT_PRIMARY);
         
         // 自定义渲染器实现标题层级缩进
         tocList.setCellRenderer(new DefaultListCellRenderer() {
@@ -1086,6 +1108,12 @@ public class UnifiedNoteAppFrame extends JFrame {
                     else if (item.level == 2) fontSize = 13;
                     label.setFont(new Font(Font.SANS_SERIF, 
                             item.level <= 2 ? Font.BOLD : Font.PLAIN, fontSize));
+                    
+                    // 应用主题色
+                    if (!isSelected) {
+                        label.setBackground(UIColors.BG_PRIMARY);
+                        label.setForeground(UIColors.TEXT_PRIMARY);
+                    }
                 }
                 
                 return label;
@@ -1103,9 +1131,24 @@ public class UnifiedNoteAppFrame extends JFrame {
         });
         
         JScrollPane scrollPane = new JScrollPane(tocList);
-        scrollPane.setBorder(BorderFactory.createTitledBorder("目录"));
+        // 使用自定义边框而不是 TitledBorder，避免白色边框
+        scrollPane.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 0, 1, UIColors.BORDER_BASE),
+            BorderFactory.createEmptyBorder(5, 5, 5, 5)
+        ));
+        applyScrollPaneTheme(scrollPane);
+        
+        // 添加目录标题标签
+        JLabel titleLabel = new JLabel("目录");
+        titleLabel.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 13));
+        titleLabel.setForeground(UIColors.TEXT_PRIMARY);
+        titleLabel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
+        titleLabel.setBackground(UIColors.BG_SECONDARY);
+        titleLabel.setOpaque(true);
         
         JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(UIColors.BG_PRIMARY);
+        panel.add(titleLabel, BorderLayout.NORTH);
         panel.add(scrollPane, BorderLayout.CENTER);
         panel.setPreferredSize(new Dimension(200, 0));
         panel.setMinimumSize(new Dimension(200, 0));
@@ -1186,9 +1229,11 @@ public class UnifiedNoteAppFrame extends JFrame {
             JScrollPane leftScrollPane = new JScrollPane(bodyArea);
             LineNumberComponent previewLineNumberComponent = new LineNumberComponent();
             leftScrollPane.setRowHeaderView(previewLineNumberComponent);
+            applyScrollPaneTheme(leftScrollPane);
             
             // 创建右侧预览区的滚动面板
             htmlScrollPane = new JScrollPane(htmlPane);
+            applyScrollPaneTheme(htmlScrollPane);
             
             // 创建目录面板
             tocPanel = createTocPanel();
@@ -3064,7 +3109,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             BorderFactory.createLineBorder(UIColors.BORDER_LIGHT, 1),
             BorderFactory.createEmptyBorder(4, 4, 4, 4)
         ));
-        selectionToolbar.setBackground(Color.WHITE);
+        selectionToolbar.setBackground(UIColors.BG_PRIMARY);
         // 关键：工具条不抢焦点，避免打断 Shift+方向键的连续选择
         selectionToolbar.setFocusable(false);
 
@@ -3101,7 +3146,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         item.setForeground(UIColors.TEXT_PRIMARY);
         item.setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
         item.setOpaque(true);
-        item.setBackground(Color.WHITE);
+        item.setBackground(UIColors.BG_PRIMARY);
         // 添加悬停效果
         item.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
@@ -3110,7 +3155,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             }
             @Override
             public void mouseExited(java.awt.event.MouseEvent e) {
-                item.setBackground(Color.WHITE);
+                item.setBackground(UIColors.BG_PRIMARY);
             }
         });
         item.addActionListener(e -> { action.run(); bodyArea.requestFocusInWindow(); });
@@ -3806,6 +3851,179 @@ public class UnifiedNoteAppFrame extends JFrame {
             
             currentY += 28;
         }
+    }
+    
+    /**
+     * 应用当前主题到所有组件
+     */
+    public void applyTheme() {
+        ThemeManager themeManager = ThemeManager.getInstance();
+        
+        // 应用编辑器主题
+        bodyArea.setBackground(themeManager.getColor("editor.background"));
+        bodyArea.setForeground(themeManager.getColor("editor.foreground"));
+        bodyArea.setCaretColor(themeManager.getColor("editor.caret"));
+        bodyArea.setSelectionColor(themeManager.getColor("editor.selection"));
+        
+        // 应用行号区域主题
+        if (lineNumberComponent != null) {
+            lineNumberComponent.setBackground(UIColors.LINE_NUMBER_BG);
+            lineNumberComponent.setForeground(UIColors.LINE_NUMBER_TEXT);
+        }
+        
+        // 应用状态栏主题
+        if (statusBar != null) {
+            statusBar.setBackground(UIColors.BG_PRIMARY);
+        }
+        if (statusLeft != null) {
+            statusLeft.setForeground(UIColors.TEXT_PRIMARY);
+        }
+        if (statusRight != null) {
+            statusRight.setForeground(UIColors.TEXT_SECONDARY);
+        }
+        
+        // 应用主编辑器滚动面板主题
+        if (bodyScrollPane != null) {
+            applyScrollPaneTheme(bodyScrollPane);
+        }
+        
+        // 应用搜索面板主题
+        if (searchPanel != null) {
+            searchPanel.setBackground(UIColors.BG_PANEL);
+            searchPanel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, UIColors.BORDER_BASE),
+                BorderFactory.createEmptyBorder(8, 10, 8, 10)
+            ));
+            themeManager.applyTheme(searchPanel);
+        }
+        
+        // 应用替换面板主题
+        if (replacePanel != null) {
+            replacePanel.setBackground(UIColors.BG_PANEL);
+            replacePanel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, UIColors.BORDER_BASE),
+                BorderFactory.createEmptyBorder(10, 10, 10, 10)
+            ));
+            themeManager.applyTheme(replacePanel);
+        }
+        
+        // 应用建议弹层主题
+        if (suggestList != null) {
+            suggestList.setBackground(UIColors.BG_PRIMARY);
+            suggestList.setForeground(UIColors.TEXT_PRIMARY);
+        }
+        
+        // 应用编辑器面板主题
+        if (editorPanel != null) {
+            editorPanel.setBackground(UIColors.BG_PRIMARY);
+        }
+        
+        // 应用预览区域主题（如果存在）
+        if (htmlPane != null) {
+            htmlPane.setBackground(themeManager.getColor("editor.background"));
+            htmlPane.setForeground(themeManager.getColor("editor.foreground"));
+        }
+        if (htmlScrollPane != null) {
+            applyScrollPaneTheme(htmlScrollPane);
+        }
+        
+        // 应用目录面板主题（如果存在）
+        if (tocPanel != null) {
+            tocPanel.setBackground(UIColors.BG_PRIMARY);
+            
+            // 更新目录列表
+            if (tocList != null) {
+                tocList.setBackground(UIColors.BG_PRIMARY);
+                tocList.setForeground(UIColors.TEXT_PRIMARY);
+            }
+            
+            // 找到并更新标题标签
+            for (Component comp : tocPanel.getComponents()) {
+                if (comp instanceof JLabel) {
+                    JLabel label = (JLabel) comp;
+                    label.setForeground(UIColors.TEXT_PRIMARY);
+                    label.setBackground(UIColors.BG_SECONDARY);
+                } else if (comp instanceof JScrollPane) {
+                    JScrollPane sp = (JScrollPane) comp;
+                    sp.setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createMatteBorder(0, 0, 0, 1, UIColors.BORDER_BASE),
+                        BorderFactory.createEmptyBorder(5, 5, 5, 5)
+                    ));
+                    applyScrollPaneTheme(sp);
+                }
+            }
+        }
+        
+        // 刷新窗口内容区域
+        getContentPane().setBackground(UIColors.BG_PRIMARY);
+        
+        // 重绘所有组件
+        repaint();
+        revalidate();
+    }
+    
+    /**
+     * 应用主题到滚动面板（包括滚动条和边框）
+     */
+    private void applyScrollPaneTheme(JScrollPane scrollPane) {
+        ThemeManager themeManager = ThemeManager.getInstance();
+        
+        // 设置视口背景
+        scrollPane.getViewport().setBackground(themeManager.getColor("editor.background"));
+        
+        // 移除边框，避免在深色主题下出现白色边框
+        scrollPane.setBorder(null);
+        
+        // 获取垂直和水平滚动条
+        JScrollBar vScrollBar = scrollPane.getVerticalScrollBar();
+        JScrollBar hScrollBar = scrollPane.getHorizontalScrollBar();
+        
+        // 应用滚动条主题
+        if (vScrollBar != null) {
+            applyScrollBarTheme(vScrollBar);
+        }
+        if (hScrollBar != null) {
+            applyScrollBarTheme(hScrollBar);
+        }
+    }
+    
+    /**
+     * 应用主题到单个滚动条
+     */
+    private void applyScrollBarTheme(JScrollBar scrollBar) {
+        ThemeManager themeManager = ThemeManager.getInstance();
+        
+        // 设置滚动条背景（轨道颜色）
+        scrollBar.setBackground(themeManager.getColor("bg.secondary"));
+        
+        // 使用 UIManager 设置滚动条颜色
+        scrollBar.setUI(new javax.swing.plaf.basic.BasicScrollBarUI() {
+            @Override
+            protected void configureScrollBarColors() {
+                this.thumbColor = UIColors.BORDER_DARK;
+                this.thumbDarkShadowColor = UIColors.BORDER_BASE;
+                this.thumbHighlightColor = UIColors.BORDER_LIGHT;
+                this.thumbLightShadowColor = UIColors.BORDER_BASE;
+                this.trackColor = themeManager.getColor("bg.secondary");
+                this.trackHighlightColor = themeManager.getColor("bg.secondary");
+            }
+            
+            @Override
+            protected JButton createDecreaseButton(int orientation) {
+                JButton button = super.createDecreaseButton(orientation);
+                button.setBackground(themeManager.getColor("bg.secondary"));
+                button.setForeground(UIColors.TEXT_SECONDARY);
+                return button;
+            }
+            
+            @Override
+            protected JButton createIncreaseButton(int orientation) {
+                JButton button = super.createIncreaseButton(orientation);
+                button.setBackground(themeManager.getColor("bg.secondary"));
+                button.setForeground(UIColors.TEXT_SECONDARY);
+                return button;
+            }
+        });
     }
 }
 

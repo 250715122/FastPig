@@ -26,7 +26,7 @@ public class CloudSyncPanel extends JPanel {
         this.config = parent.getConfig();
         
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-        setBackground(Color.WHITE);
+        setBackground(UIColors.BG_PRIMARY);
         
         initializeComponents();
     }

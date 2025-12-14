@@ -48,11 +48,11 @@ public class PasteOptionDialog extends JDialog {
                 label.setBorder(new EmptyBorder(8, 12, 8, 12));
                 
                 if (isSelected) {
-                    label.setBackground(new Color(64, 158, 255));
+                    label.setBackground(UIColors.PRIMARY);
                     label.setForeground(Color.WHITE);
                 } else {
-                    label.setBackground(Color.WHITE);
-                    label.setForeground(new Color(60, 65, 70));
+                    label.setBackground(UIColors.BG_PRIMARY);
+                    label.setForeground(UIColors.TEXT_PRIMARY);
                 }
                 
                 return label;
@@ -70,20 +70,24 @@ public class PasteOptionDialog extends JDialog {
         });
         
         JScrollPane scrollPane = new JScrollPane(optionList);
-        scrollPane.setBorder(BorderFactory.createLineBorder(new Color(220, 225, 230)));
+        scrollPane.setBorder(BorderFactory.createLineBorder(UIColors.BORDER_BASE));
         scrollPane.setPreferredSize(new Dimension(400, 150));
         
         JPanel centerPanel = new JPanel(new BorderLayout());
         centerPanel.setBorder(new EmptyBorder(0, 20, 10, 20));
+        centerPanel.setBackground(UIColors.BG_PRIMARY);
         centerPanel.add(scrollPane, BorderLayout.CENTER);
         add(centerPanel, BorderLayout.CENTER);
         
         // 底部提示
         JLabel hintLabel = new JLabel("提示: 使用 ↑↓ 方向键选择，Enter 确认，Esc 取消");
         hintLabel.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 11));
-        hintLabel.setForeground(new Color(130, 135, 140));
+        hintLabel.setForeground(UIColors.TEXT_SECONDARY);
         hintLabel.setBorder(new EmptyBorder(5, 20, 15, 20));
         add(hintLabel, BorderLayout.SOUTH);
+        
+        // 应用主题
+        applyTheme();
         
         pack();
     }
@@ -150,6 +154,22 @@ public class PasteOptionDialog extends JDialog {
         PasteOptionDialog dialog = new PasteOptionDialog(parent, message, title, options, defaultIndex);
         dialog.setVisible(true);
         return dialog.getSelectedOption();
+    }
+    
+    /**
+     * 应用主题到对话框
+     */
+    private void applyTheme() {
+        ThemeManager themeManager = ThemeManager.getInstance();
+        
+        // 应用对话框背景
+        getContentPane().setBackground(UIColors.BG_PRIMARY);
+        
+        // 应用选项列表主题
+        optionList.setBackground(UIColors.BG_PRIMARY);
+        
+        // 重绘
+        repaint();
     }
 }
 

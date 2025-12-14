@@ -11,6 +11,7 @@ public class UIPanel extends JPanel {
     private final SettingsDialog parent;
     private final AppConfig config;
     
+    private JComboBox<String> themeComboBox;
     private JSpinner windowWidthSpinner;
     private JSpinner windowHeightSpinner;
     private JCheckBox startMaximizedCheckBox;
@@ -20,7 +21,7 @@ public class UIPanel extends JPanel {
         this.config = parent.getConfig();
         
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-        setBackground(Color.WHITE);
+        setBackground(UIColors.BG_PRIMARY);
         
         initializeComponents();
     }
@@ -28,6 +29,15 @@ public class UIPanel extends JPanel {
     private void initializeComponents() {
         add(createTitle("🎨 界面配置"));
         add(Box.createVerticalStrut(20));
+        
+        // 主题颜色
+        add(createSection("主题颜色", "选择应用界面主题"));
+        themeComboBox = new JComboBox<>(ThemeManager.getThemeDisplayNames());
+        themeComboBox.setMaximumSize(new Dimension(200, 35));
+        themeComboBox.setAlignmentX(LEFT_ALIGNMENT);
+        themeComboBox.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+        add(themeComboBox);
+        add(Box.createVerticalStrut(15));
         
         // 窗口宽度
         add(createSection("窗口宽度", "默认窗口宽度（像素）"));
@@ -94,12 +104,34 @@ public class UIPanel extends JPanel {
     }
     
     public void loadConfig() {
+        // 加载主题配置
+        ThemeManager themeManager = ThemeManager.getInstance();
+        String currentThemeName = themeManager.getCurrentTheme().getDisplayName();
+        themeComboBox.setSelectedItem(currentThemeName);
+        
         windowWidthSpinner.setValue(config.getInt(AppConfig.UI_WINDOW_WIDTH, 1100));
         windowHeightSpinner.setValue(config.getInt(AppConfig.UI_WINDOW_HEIGHT, 720));
         startMaximizedCheckBox.setSelected(config.getBoolean(AppConfig.UI_START_MAXIMIZED, false));
     }
     
     public void saveConfig() {
+        // 保存并应用主题
+        String selectedTheme = (String) themeComboBox.getSelectedItem();
+        ThemeManager themeManager = ThemeManager.getInstance();
+        themeManager.setThemeByDisplayName(selectedTheme);
+        
+        // 刷新 UIColors
+        UIColors.refresh();
+        
+        // 通知主窗口更新
+        UnifiedNoteAppFrame activeFrame = UnifiedNoteAppFrame.getActiveInstance();
+        if (activeFrame != null) {
+            activeFrame.applyTheme();
+        }
+        
+        // 应用主题到设置对话框自身
+        parent.applyTheme();
+        
         config.setInt(AppConfig.UI_WINDOW_WIDTH, (Integer) windowWidthSpinner.getValue());
         config.setInt(AppConfig.UI_WINDOW_HEIGHT, (Integer) windowHeightSpinner.getValue());
         config.setBoolean(AppConfig.UI_START_MAXIMIZED, startMaximizedCheckBox.isSelected());

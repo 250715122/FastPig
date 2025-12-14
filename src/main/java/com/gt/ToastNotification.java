@@ -50,7 +50,7 @@ public class ToastNotification extends JWindow {
         
         // 确保Toast窗口完全不透明，不受父窗口透明度影响
         try {
-            setBackground(Color.WHITE); // 设置不透明背景
+            setBackground(UIColors.BG_PRIMARY); // 设置不透明背景
             setOpacity(1.0f); // 确保完全不透明
         } catch (Exception e) {
             // 忽略异常，继续创建Toast
@@ -58,7 +58,7 @@ public class ToastNotification extends JWindow {
         
         // 创建内容面板
         JPanel contentPanel = new JPanel(new BorderLayout(12, 0));
-        contentPanel.setBackground(Color.WHITE);
+        contentPanel.setBackground(UIColors.BG_PRIMARY);
         contentPanel.setOpaque(true); // 确保面板不透明
         contentPanel.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(type.color, 2),

@@ -15,7 +15,7 @@ public class ShortcutsPanel extends JPanel {
         this.parent = parent;
         
         setLayout(new BorderLayout());
-        setBackground(Color.WHITE);
+        setBackground(UIColors.BG_PRIMARY);
         
         initializeComponents();
     }
