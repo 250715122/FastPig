@@ -60,6 +60,7 @@ public class EditorPanel extends JPanel {
         fontSizeSpinner = new JSpinner(new SpinnerNumberModel(14, 10, 24, 1));
         fontSizeSpinner.setMaximumSize(new Dimension(100, 35));
         fontSizeSpinner.setAlignmentX(LEFT_ALIGNMENT);
+        applySpinnerTheme(fontSizeSpinner);
         add(fontSizeSpinner);
         add(Box.createVerticalStrut(15));
         
@@ -68,6 +69,7 @@ public class EditorPanel extends JPanel {
         autosaveIntervalSpinner = new JSpinner(new SpinnerNumberModel(10, 3, 60, 1));
         autosaveIntervalSpinner.setMaximumSize(new Dimension(100, 35));
         autosaveIntervalSpinner.setAlignmentX(LEFT_ALIGNMENT);
+        applySpinnerTheme(autosaveIntervalSpinner);
         add(autosaveIntervalSpinner);
         
         add(Box.createVerticalGlue());
@@ -125,6 +127,24 @@ public class EditorPanel extends JPanel {
     public void applyConfig() {
         // TODO: 立即应用编辑器配置到主窗口
         // 需要访问 UnifiedNoteAppFrame 的 bodyArea 来更新字体
+    }
+    
+    /**
+     * 应用主题到 Spinner 控件
+     */
+    private void applySpinnerTheme(JSpinner spinner) {
+        spinner.setBackground(UIColors.BG_PRIMARY);
+        spinner.setForeground(UIColors.TEXT_PRIMARY);
+        
+        // 获取编辑器组件并设置主题
+        JComponent editor = spinner.getEditor();
+        if (editor instanceof JSpinner.DefaultEditor) {
+            JSpinner.DefaultEditor defaultEditor = (JSpinner.DefaultEditor) editor;
+            JTextField textField = defaultEditor.getTextField();
+            textField.setBackground(UIColors.BG_PRIMARY);
+            textField.setForeground(UIColors.TEXT_PRIMARY);
+            textField.setCaretColor(UIColors.TEXT_PRIMARY);
+        }
     }
 }
 

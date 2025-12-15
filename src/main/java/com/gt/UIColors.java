@@ -141,6 +141,14 @@ public class UIColors {
     /** 次按钮边框 */
     public static Color BTN_SECONDARY_BORDER = themeManager.getColor("button.secondary.border");
     
+    // ===== 列表色系（动态跟随主题）=====
+    
+    /** 列表选中背景 */
+    public static Color LIST_SELECTION_BG = themeManager.getColor("list.selection.background");
+    
+    /** 列表选中前景 */
+    public static Color LIST_SELECTION_FG = themeManager.getColor("list.selection.foreground");
+    
     /** 危险按钮背景 */
     public static final Color BTN_DANGER_BG = DANGER;
     
@@ -236,6 +244,10 @@ public class UIColors {
         BTN_SECONDARY_ACTIVE = themeManager.getColor("bg.hover");
         BTN_SECONDARY_TEXT = themeManager.getColor("button.secondary.text");
         BTN_SECONDARY_BORDER = themeManager.getColor("button.secondary.border");
+        
+        // 刷新列表色
+        LIST_SELECTION_BG = themeManager.getColor("list.selection.background");
+        LIST_SELECTION_FG = themeManager.getColor("list.selection.foreground");
     }
 }
 

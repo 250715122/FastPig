@@ -201,6 +201,7 @@ public class UnifiedNoteAppFrame extends JFrame {
     private final JPopupMenu suggestPopup = new JPopupMenu();
     private final DefaultListModel<String> suggestModel = new DefaultListModel<>();
     private final JList<String> suggestList = new JList<>(suggestModel);
+    private JScrollPane suggestScrollPane; // 补全面板滚动容器
     private int suggestSelectedIndex = -1;
     // 去除左侧结果列表，以输入联想替代
 
@@ -277,17 +278,45 @@ public class UnifiedNoteAppFrame extends JFrame {
             }
         });
 
+        // Windows 原生标题栏/边框：深色主题下启用沉浸式深色（非 Swing 客户区，需 DWM 支持）
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowOpened(WindowEvent e) {
+                WindowsTitleBarUtil.applyForCurrentTheme(UnifiedNoteAppFrame.this);
+            }
+
+            @Override
+            public void windowActivated(WindowEvent e) {
+                // 从托盘/切换焦点回来时，确保标题栏状态正确
+                WindowsTitleBarUtil.applyForCurrentTheme(UnifiedNoteAppFrame.this);
+            }
+        });
+
+        ThemeManager.getInstance().addThemeChangeListener(newTheme ->
+            SwingUtilities.invokeLater(() -> WindowsTitleBarUtil.apply(UnifiedNoteAppFrame.this, newTheme == ThemeManager.Theme.DARK))
+        );
+
         // 顶部按钮已移除（搜索、预览不再显示，预览保留 Alt+P 快捷键）
 
         // 建议弹层
-        JScrollPane sp = new JScrollPane(suggestList);
-        sp.setPreferredSize(new Dimension(420, 160));
-        suggestPopup.add(sp);
+        suggestScrollPane = new JScrollPane(suggestList);
+        suggestScrollPane.setPreferredSize(new Dimension(420, 160));
+        suggestPopup.add(suggestScrollPane);
         suggestList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         // 不让弹层或列表抢焦点，方向键由输入框驱动
         suggestList.setFocusable(false);
-        sp.setFocusable(false);
+        suggestScrollPane.setFocusable(false);
         suggestPopup.setFocusable(false);
+        // 初始化补全面板主题色
+        suggestPopup.setBackground(UIColors.BG_PRIMARY);
+        suggestPopup.setBorder(BorderFactory.createLineBorder(UIColors.BORDER_BASE));
+        suggestList.setBackground(UIColors.BG_PRIMARY);
+        suggestList.setForeground(UIColors.TEXT_PRIMARY);
+        suggestList.setSelectionBackground(UIColors.LIST_SELECTION_BG);
+        suggestList.setSelectionForeground(UIColors.LIST_SELECTION_FG);
+        suggestScrollPane.setBackground(UIColors.BG_PRIMARY);
+        suggestScrollPane.getViewport().setBackground(UIColors.BG_PRIMARY);
+        applyScrollPaneTheme(suggestScrollPane);
         suggestList.addMouseListener(new java.awt.event.MouseAdapter(){
             public void mouseClicked(java.awt.event.MouseEvent e){
                 if (e.getClickCount()==2){
@@ -386,6 +415,8 @@ public class UnifiedNoteAppFrame extends JFrame {
             }
         });
         bodyArea.setLineWrap(true);
+        // 移除默认内边距，避免顶部/四周出现浅色空隙
+        bodyArea.setMargin(new Insets(0, 0, 0, 0));
         
         // 图片粘贴功能已整合到 installPasteHandlers() → doPasteWithChoice() → tryPasteImage()
         // 注释掉此行避免 TransferHandler 冲突导致复制功能失效
@@ -420,7 +451,7 @@ public class UnifiedNoteAppFrame extends JFrame {
 
         // 初始化页内搜索面板
         initSearchPanel();
-        
+
         // 初始化批量替换面板
         initReplacePanel();
         
@@ -1005,7 +1036,8 @@ public class UnifiedNoteAppFrame extends JFrame {
                     });
                 } else {
                     // 隐藏目录：只显示编辑区
-                    JPanel editorOnlyPanel = new JPanel(new BorderLayout(8, 8));
+                    JPanel editorOnlyPanel = new JPanel(new BorderLayout());
+                    editorOnlyPanel.setBackground(UIColors.BG_PRIMARY);
                     editorOnlyPanel.add(bodyScrollPane, BorderLayout.CENTER);
                     editorOnlyPanel.add(statusBar, BorderLayout.SOUTH);
                     
@@ -1225,6 +1257,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             htmlPane = new JEditorPane();
             htmlPane.setEditable(false);
             htmlPane.setContentType("text/html;charset=UTF-8");
+            htmlPane.setBackground(UIColors.BG_PRIMARY);
 
             // 为预览模式创建带行号的 JScrollPane
             JScrollPane leftScrollPane = new JScrollPane(bodyArea);
@@ -1294,7 +1327,8 @@ public class UnifiedNoteAppFrame extends JFrame {
             LineNumberComponent normalLineNumberComponent = new LineNumberComponent();
             bodyScrollPane.setRowHeaderView(normalLineNumberComponent);
             
-            JPanel editor2 = new JPanel(new BorderLayout(8, 8));
+            JPanel editor2 = new JPanel(new BorderLayout());
+            editor2.setBackground(UIColors.BG_PRIMARY);
             editor2.add(bodyScrollPane, BorderLayout.CENTER);
             editor2.add(statusBar, BorderLayout.SOUTH);
             centerComponent = editor2;
@@ -1338,17 +1372,9 @@ public class UnifiedNoteAppFrame extends JFrame {
             System.out.println("[预览] 是否包含<table>: " + (html.contains("<table") ? "是" : "否"));
         } catch (Exception ignore) {}
         
-        // 构建完整的 HTML
+        // 构建完整的 HTML（使用动态主题样式）
         String fullHtml = "<html><head><meta charset='utf-8'><style>" +
-                         "body { font-family: 'Segoe UI', sans-serif; line-height: 1.6; padding: 10px; }" +
-                         "p { white-space: pre-wrap; }" +
-                         "pre { background-color: #f5f5f5; padding: 10px; border-radius: 5px; overflow-x: auto; white-space: pre-wrap; }" +
-                         "code { background-color: #f0f0f0; padding: 2px 4px; border-radius: 3px; }" +
-                         "img { max-width: 100%; height: auto; display: block; margin: 10px auto; }" +
-                         "table { border-collapse: collapse; width: 100%; margin: 10px 0; white-space: normal; }" +
-                         "th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }" +
-                         "th { background-color: #f5f5f5; font-weight: bold; }" +
-                         "tr:nth-child(even) { background-color: #fafafa; }" +
+                         getPreviewHtmlStyle() +
                          "</style></head><body>" + html + "</body></html>";
         htmlPane.setText(fullHtml);
         htmlPane.setCaretPosition(0);
@@ -1377,6 +1403,43 @@ public class UnifiedNoteAppFrame extends JFrame {
             t.setRepeats(false);
             t.start();
         } catch (Exception ignored) {}
+    }
+    
+    /**
+     * 根据当前主题生成预览区的 HTML CSS 样式
+     * @return CSS 样式字符串
+     */
+    private String getPreviewHtmlStyle() {
+        String bgPrimary = colorToHex(UIColors.BG_PRIMARY);
+        String textPrimary = colorToHex(UIColors.TEXT_PRIMARY);
+        String bgSecondary = colorToHex(UIColors.BG_SECONDARY);
+        String bgHover = colorToHex(UIColors.BG_HOVER);
+        String bgPanel = colorToHex(UIColors.BG_PANEL);
+        String borderBase = colorToHex(UIColors.BORDER_BASE);
+        String textSecondary = colorToHex(UIColors.TEXT_SECONDARY);
+        
+        return "body { font-family: 'Segoe UI', sans-serif; line-height: 1.6; padding: 10px; " +
+               "background-color: " + bgPrimary + "; color: " + textPrimary + "; }" +
+               "p { white-space: pre-wrap; }" +
+               "pre { background-color: " + bgSecondary + "; padding: 10px; border-radius: 5px; overflow-x: auto; white-space: pre-wrap; }" +
+               "code { background-color: " + bgHover + "; padding: 2px 4px; border-radius: 3px; }" +
+               "img { max-width: 100%; height: auto; display: block; margin: 10px auto; }" +
+               "table { border-collapse: collapse; width: 100%; margin: 10px 0; white-space: normal; }" +
+               "th, td { border: 1px solid " + borderBase + "; padding: 8px 12px; text-align: left; color: " + textPrimary + "; }" +
+               "th { background-color: " + bgSecondary + "; font-weight: bold; }" +
+               "tr:nth-child(even) { background-color: " + bgPanel + "; }" +
+               "a { color: #409eff; }" +
+               "blockquote { border-left: 4px solid " + borderBase + "; margin: 10px 0; padding-left: 15px; color: " + textSecondary + "; }" +
+               "h1, h2, h3, h4, h5, h6 { color: " + textPrimary + "; margin-top: 20px; margin-bottom: 10px; }";
+    }
+    
+    /**
+     * 将 Color 对象转换为 CSS hex 格式
+     * @param color 颜色对象
+     * @return CSS hex 格式字符串 (如 #ffffff)
+     */
+    private String colorToHex(Color color) {
+        return String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
     }
     
     /**
@@ -3836,15 +3899,15 @@ public class UnifiedNoteAppFrame extends JFrame {
                                     ShortcutData.ShortcutCategory category) {
         int currentY = y;
         
-        // 分类标题文字 - 深灰色，加粗
+        // 分类标题文字 - 使用主题主色
         g2.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 15));
-        g2.setColor(new Color(60, 65, 70));
+        g2.setColor(UIColors.TEXT_PRIMARY);
         g2.drawString(category.name, x, currentY);
         
         currentY += 8;
         
-        // 绘制分隔线 - 浅灰色细线
-        g2.setColor(new Color(220, 225, 230));
+        // 绘制分隔线 - 使用主题边框色
+        g2.setColor(UIColors.BORDER_BASE);
         g2.setStroke(new java.awt.BasicStroke(1.0f));
         g2.drawLine(x, currentY, x + width, currentY);
         
@@ -3855,14 +3918,14 @@ public class UnifiedNoteAppFrame extends JFrame {
         
         // 快捷键列表 - 固定宽度对齐
         for (ShortcutData.Shortcut shortcut : category.shortcuts) {
-            // 快捷键 - Consolas字体，中等蓝色
+            // 快捷键 - Consolas字体，使用主题强调色
             g2.setFont(new Font("Consolas", Font.PLAIN, 13));
-            g2.setColor(new Color(64, 128, 200));
+            g2.setColor(UIColors.PRIMARY);
             g2.drawString(shortcut.keys, x, currentY);
             
-            // 描述 - 微软雅黑，浅灰色，从固定位置开始
+            // 描述 - 微软雅黑，使用主题次要文字色，从固定位置开始
             g2.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
-            g2.setColor(new Color(115, 120, 125));
+            g2.setColor(UIColors.TEXT_SECONDARY);
             int descX = x + keyColumnWidth; // 固定列宽
             g2.drawString(shortcut.description, descX, currentY);
             
@@ -3875,6 +3938,17 @@ public class UnifiedNoteAppFrame extends JFrame {
      */
     public void applyTheme() {
         ThemeManager themeManager = ThemeManager.getInstance();
+        
+        // 统一设置根容器背景与边框，避免顶部出现浅色边缘
+        JRootPane rootPane = getRootPane();
+        if (rootPane != null) {
+            rootPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 0, UIColors.BG_PRIMARY));
+            rootPane.setBackground(UIColors.BG_PRIMARY);
+            Container content = rootPane.getContentPane();
+            if (content != null) {
+                content.setBackground(UIColors.BG_PRIMARY);
+            }
+        }
         
         // 应用编辑器主题
         bodyArea.setBackground(themeManager.getColor("editor.background"));
@@ -3925,9 +3999,20 @@ public class UnifiedNoteAppFrame extends JFrame {
         }
         
         // 应用建议弹层主题
+        if (suggestPopup != null) {
+            suggestPopup.setBackground(UIColors.BG_PRIMARY);
+            suggestPopup.setBorder(BorderFactory.createLineBorder(UIColors.BORDER_BASE));
+        }
         if (suggestList != null) {
             suggestList.setBackground(UIColors.BG_PRIMARY);
             suggestList.setForeground(UIColors.TEXT_PRIMARY);
+            suggestList.setSelectionBackground(UIColors.LIST_SELECTION_BG);
+            suggestList.setSelectionForeground(UIColors.LIST_SELECTION_FG);
+        }
+        if (suggestScrollPane != null) {
+            suggestScrollPane.setBackground(UIColors.BG_PRIMARY);
+            suggestScrollPane.getViewport().setBackground(UIColors.BG_PRIMARY);
+            applyScrollPaneTheme(suggestScrollPane);
         }
         
         // 应用编辑器面板主题

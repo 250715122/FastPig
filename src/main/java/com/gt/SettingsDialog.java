@@ -46,6 +46,19 @@ public class SettingsDialog extends JDialog {
         
         // 应用当前主题
         applyTheme();
+
+        // Windows 原生标题栏/边框（非 Swing 客户区）：在窗口显示后再应用
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowOpened(java.awt.event.WindowEvent e) {
+                WindowsTitleBarUtil.applyForCurrentTheme(SettingsDialog.this);
+            }
+
+            @Override
+            public void windowActivated(java.awt.event.WindowEvent e) {
+                WindowsTitleBarUtil.applyForCurrentTheme(SettingsDialog.this);
+            }
+        });
         
         setSize(900, 600);
         setLocationRelativeTo(parent);
@@ -76,8 +89,8 @@ public class SettingsDialog extends JDialog {
                 label.setOpaque(true);
                 
                 if (isSelected) {
-                    label.setBackground(UIColors.PRIMARY_LIGHTER);
-                    label.setForeground(UIColors.PRIMARY);
+                    label.setBackground(UIColors.LIST_SELECTION_BG);
+                    label.setForeground(UIColors.LIST_SELECTION_FG);
                     label.setFont(label.getFont().deriveFont(Font.BOLD));
                 } else {
                     label.setBackground(UIColors.BG_SECONDARY);

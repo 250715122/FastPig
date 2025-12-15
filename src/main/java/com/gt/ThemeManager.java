@@ -189,6 +189,10 @@ public class ThemeManager {
             case "button.secondary.text": return new Color(48, 49, 51);
             case "button.secondary.border": return new Color(220, 223, 230);
             
+            // 列表选中
+            case "list.selection.background": return new Color(236, 245, 255);
+            case "list.selection.foreground": return new Color(64, 158, 255);
+            
             default: return new Color(255, 255, 255);
         }
     }
@@ -234,6 +238,10 @@ public class ThemeManager {
             case "button.secondary.text": return new Color(224, 224, 224);
             case "button.secondary.border": return new Color(60, 60, 60);
             
+            // 列表选中
+            case "list.selection.background": return new Color(60, 60, 60);
+            case "list.selection.foreground": return new Color(224, 224, 224);
+            
             default: return new Color(30, 30, 30);
         }
     }
@@ -278,6 +286,10 @@ public class ThemeManager {
             case "button.secondary.hover": return new Color(180, 222, 185);
             case "button.secondary.text": return new Color(44, 95, 45);
             case "button.secondary.border": return new Color(151, 201, 158);
+            
+            // 列表选中
+            case "list.selection.background": return new Color(170, 220, 175);
+            case "list.selection.foreground": return new Color(44, 95, 45);
             
             default: return new Color(199, 237, 204);
         }
