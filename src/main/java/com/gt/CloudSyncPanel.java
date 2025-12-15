@@ -43,6 +43,21 @@ public class CloudSyncPanel extends JPanel {
         String[] providerNames = {"坚果云 WebDAV", "本地备份", "禁用云同步"};
         providerComboBox = new JComboBox<>(providerNames);
         providerComboBox.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+        providerComboBox.setBackground(UIColors.BG_PRIMARY);
+        providerComboBox.setForeground(UIColors.TEXT_PRIMARY);
+        // 设置下拉列表渲染器的主题
+        providerComboBox.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, 
+                                                         int index, boolean isSelected, boolean cellHasFocus) {
+                JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (!isSelected) {
+                    label.setBackground(UIColors.BG_PRIMARY);
+                    label.setForeground(UIColors.TEXT_PRIMARY);
+                }
+                return label;
+            }
+        });
         providerComboBox.setMaximumSize(new Dimension(400, 35));
         providerComboBox.setAlignmentX(LEFT_ALIGNMENT);
         add(providerComboBox);
@@ -62,6 +77,9 @@ public class CloudSyncPanel extends JPanel {
             "不是登录密码！需要在坚果云网页端生成"));
         passwordField = new JPasswordField(30);
         passwordField.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+        passwordField.setBackground(UIColors.BG_PRIMARY);
+        passwordField.setForeground(UIColors.TEXT_PRIMARY);
+        passwordField.setCaretColor(UIColors.TEXT_PRIMARY);
         passwordField.setBorder(UIComponents.createRoundedBorder(UIColors.BORDER_BASE, 4, 8, 12));
         passwordField.setMaximumSize(new Dimension(400, 35));
         passwordField.setAlignmentX(LEFT_ALIGNMENT);

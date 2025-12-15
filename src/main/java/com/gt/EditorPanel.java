@@ -35,6 +35,21 @@ public class EditorPanel extends JPanel {
         String[] fonts = {"Consolas", "Monaco", "Courier New", "Monospaced"};
         fontComboBox = new JComboBox<>(fonts);
         fontComboBox.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+        fontComboBox.setBackground(UIColors.BG_PRIMARY);
+        fontComboBox.setForeground(UIColors.TEXT_PRIMARY);
+        // 设置下拉列表渲染器的主题
+        fontComboBox.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, 
+                                                         int index, boolean isSelected, boolean cellHasFocus) {
+                JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (!isSelected) {
+                    label.setBackground(UIColors.BG_PRIMARY);
+                    label.setForeground(UIColors.TEXT_PRIMARY);
+                }
+                return label;
+            }
+        });
         fontComboBox.setMaximumSize(new Dimension(400, 35));
         fontComboBox.setAlignmentX(LEFT_ALIGNMENT);
         add(fontComboBox);

@@ -155,6 +155,13 @@ public class SettingsDialog extends JDialog {
             KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0),
             JComponent.WHEN_IN_FOCUSED_WINDOW
         );
+        
+        // Ctrl+, 键也可以关闭对话框（与打开保持一致）
+        getRootPane().registerKeyboardAction(
+            e -> dispose(),
+            KeyStroke.getKeyStroke(KeyEvent.VK_COMMA, KeyEvent.CTRL_DOWN_MASK),
+            JComponent.WHEN_IN_FOCUSED_WINDOW
+        );
     }
     
     /**

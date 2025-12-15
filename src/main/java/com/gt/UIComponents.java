@@ -29,6 +29,8 @@ public class UIComponents {
         JTextField textField = new JTextField(columns);
         textField.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
         textField.setForeground(UIColors.TEXT_PRIMARY);
+        textField.setBackground(UIColors.BG_PRIMARY);
+        textField.setCaretColor(UIColors.TEXT_PRIMARY);
         textField.setBorder(createRoundedBorder(UIColors.BORDER_BASE, RADIUS_SMALL, 8, 12));
         
         // 添加聚焦效果
@@ -208,7 +210,7 @@ public class UIComponents {
         JCheckBox checkBox = new JCheckBox(text);
         checkBox.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
         checkBox.setForeground(UIColors.TEXT_PRIMARY);
-        checkBox.setBackground(UIColors.BG_PANEL);
+        checkBox.setBackground(UIColors.BG_PRIMARY);
         checkBox.setFocusPainted(false);
         checkBox.setCursor(new Cursor(Cursor.HAND_CURSOR));
         return checkBox;

@@ -36,6 +36,21 @@ public class UIPanel extends JPanel {
         themeComboBox.setMaximumSize(new Dimension(200, 35));
         themeComboBox.setAlignmentX(LEFT_ALIGNMENT);
         themeComboBox.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+        themeComboBox.setBackground(UIColors.BG_PRIMARY);
+        themeComboBox.setForeground(UIColors.TEXT_PRIMARY);
+        // 设置下拉列表渲染器的主题
+        themeComboBox.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, 
+                                                         int index, boolean isSelected, boolean cellHasFocus) {
+                JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (!isSelected) {
+                    label.setBackground(UIColors.BG_PRIMARY);
+                    label.setForeground(UIColors.TEXT_PRIMARY);
+                }
+                return label;
+            }
+        });
         add(themeComboBox);
         add(Box.createVerticalStrut(15));
         
@@ -44,6 +59,7 @@ public class UIPanel extends JPanel {
         windowWidthSpinner = new JSpinner(new SpinnerNumberModel(1100, 800, 2560, 10));
         windowWidthSpinner.setMaximumSize(new Dimension(150, 35));
         windowWidthSpinner.setAlignmentX(LEFT_ALIGNMENT);
+        applySpinnerTheme(windowWidthSpinner);
         add(windowWidthSpinner);
         add(Box.createVerticalStrut(15));
         
@@ -52,6 +68,7 @@ public class UIPanel extends JPanel {
         windowHeightSpinner = new JSpinner(new SpinnerNumberModel(720, 600, 1440, 10));
         windowHeightSpinner.setMaximumSize(new Dimension(150, 35));
         windowHeightSpinner.setAlignmentX(LEFT_ALIGNMENT);
+        applySpinnerTheme(windowHeightSpinner);
         add(windowHeightSpinner);
         add(Box.createVerticalStrut(20));
         
@@ -145,6 +162,24 @@ public class UIPanel extends JPanel {
             return false;
         }
         return true;
+    }
+    
+    /**
+     * 应用主题到 Spinner 控件
+     */
+    private void applySpinnerTheme(JSpinner spinner) {
+        spinner.setBackground(UIColors.BG_PRIMARY);
+        spinner.setForeground(UIColors.TEXT_PRIMARY);
+        
+        // 获取编辑器组件并设置主题
+        JComponent editor = spinner.getEditor();
+        if (editor instanceof JSpinner.DefaultEditor) {
+            JSpinner.DefaultEditor defaultEditor = (JSpinner.DefaultEditor) editor;
+            JTextField textField = defaultEditor.getTextField();
+            textField.setBackground(UIColors.BG_PRIMARY);
+            textField.setForeground(UIColors.TEXT_PRIMARY);
+            textField.setCaretColor(UIColors.TEXT_PRIMARY);
+        }
     }
 }
 
