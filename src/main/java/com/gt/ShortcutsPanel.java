@@ -84,9 +84,18 @@ public class ShortcutsPanel extends JPanel {
         table.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
         table.setRowHeight(30);
         table.setShowGrid(true);
-        table.setGridColor(UIColors.BORDER_LIGHT);
+        table.setGridColor(UIColors.BORDER_BASE);
+        
+        // 应用主题颜色到表格
+        table.setBackground(UIColors.BG_PRIMARY);
+        table.setForeground(UIColors.TEXT_PRIMARY);
+        table.setSelectionBackground(UIColors.BG_ACTIVE);
+        table.setSelectionForeground(UIColors.TEXT_PRIMARY);
+        
+        // 应用主题颜色到表头
         table.getTableHeader().setFont(new Font("Microsoft YaHei UI", Font.BOLD, 13));
         table.getTableHeader().setBackground(UIColors.BG_SECONDARY);
+        table.getTableHeader().setForeground(UIColors.TEXT_PRIMARY);
         
         // 设置列宽
         table.getColumnModel().getColumn(0).setPreferredWidth(150);
@@ -94,7 +103,8 @@ public class ShortcutsPanel extends JPanel {
         table.getColumnModel().getColumn(2).setPreferredWidth(300);
         
         JScrollPane scrollPane = new JScrollPane(table);
-        scrollPane.setBorder(BorderFactory.createLineBorder(UIColors.BORDER_LIGHT));
+        scrollPane.setBorder(BorderFactory.createLineBorder(UIColors.BORDER_BASE));
+        scrollPane.getViewport().setBackground(UIColors.BG_PRIMARY);
         add(scrollPane, BorderLayout.CENTER);
     }
 }
