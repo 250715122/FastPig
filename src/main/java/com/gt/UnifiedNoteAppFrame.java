@@ -644,12 +644,12 @@ public class UnifiedNoteAppFrame extends JFrame {
         root.getActionMap().put("showReplacePanel", new AbstractAction(){
             @Override public void actionPerformed(ActionEvent e){ toggleReplacePanel(); }
         });
-        // Ctrl+, 打开设置
+        // Ctrl+, 切换设置对话框
         KeyStroke ksSettings = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_COMMA, 
             java.awt.event.InputEvent.CTRL_DOWN_MASK);
-        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksSettings, "openSettings");
-        root.getActionMap().put("openSettings", new AbstractAction(){
-            @Override public void actionPerformed(ActionEvent e){ openSettings(); }
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksSettings, "toggleSettings");
+        root.getActionMap().put("toggleSettings", new AbstractAction(){
+            @Override public void actionPerformed(ActionEvent e){ toggleSettings(); }
         });
         // Alt+Shift+Up/Down 多光标
         KeyStroke ksMultiCursorUp = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_UP, 
@@ -788,6 +788,7 @@ public class UnifiedNoteAppFrame extends JFrame {
     // private JButton previewBtnRef;
     // 保持最近激活实例，便于全局热键调用
     private static volatile UnifiedNoteAppFrame ACTIVE;
+    private SettingsDialog settingsDialog; // 设置对话框实例，支持 toggle
     public static UnifiedNoteAppFrame getActiveInstance() { return ACTIVE; }
     // 选区悬浮工具条
     private JPopupMenu selectionToolbar;
@@ -3762,11 +3763,27 @@ public class UnifiedNoteAppFrame extends JFrame {
     }
     
     /**
-     * 打开设置对话框
+     * 切换设置对话框（打开/关闭）
      */
-    private void openSettings() {
-        SettingsDialog settingsDialog = new SettingsDialog(this);
-        settingsDialog.setVisible(true);
+    private void toggleSettings() {
+        if (settingsDialog != null && settingsDialog.isVisible()) {
+            // 设置对话框已打开，关闭它
+            settingsDialog.dispose();
+            settingsDialog = null;
+        } else {
+            // 设置对话框未打开，创建并显示
+            settingsDialog = new SettingsDialog(this);
+            
+            // 添加窗口关闭监听器，关闭时清理引用
+            settingsDialog.addWindowListener(new java.awt.event.WindowAdapter() {
+                @Override
+                public void windowClosed(java.awt.event.WindowEvent e) {
+                    settingsDialog = null;
+                }
+            });
+            
+            settingsDialog.setVisible(true);
+        }
     }
     
     /**

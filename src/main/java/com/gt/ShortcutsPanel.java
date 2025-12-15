@@ -70,7 +70,7 @@ public class ShortcutsPanel extends JPanel {
             {"退出多光标", "Esc", "退出多光标编辑模式"},
             
             // 设置
-            {"打开设置", "Ctrl+,", "打开设置对话框"},
+            {"切换设置", "Ctrl+,", "打开/关闭设置对话框"},
         };
         
         DefaultTableModel model = new DefaultTableModel(data, columnNames) {
