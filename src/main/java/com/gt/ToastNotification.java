@@ -104,11 +104,8 @@ public class ToastNotification extends JWindow {
         setContentPane(contentPanel);
         setSize(TOAST_WIDTH, TOAST_HEIGHT);
         
-        // 添加阴影效果（通过背景实现）
-        getRootPane().setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createEmptyBorder(4, 4, 4, 4),
-            contentPanel.getBorder()
-        ));
+        // 外边距（避免与 contentPanel 的边框重复绘制，导致双层线框）
+        getRootPane().setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
         
         // 设置位置
         updateLocation();
