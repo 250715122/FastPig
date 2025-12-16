@@ -9,9 +9,11 @@ import org.slf4j.LoggerFactory;
 import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Base64;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
@@ -35,6 +37,8 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
     // 默认 WebDAV 地址
     private static final String DEFAULT_WEBDAV_BASE = "https://dav.jianguoyun.com/dav/";
     private static final String DEFAULT_SYNC_PATH = "FastPig/notes";
+
+    private static final String B64_PREFIX = "b64:";
     
     // 请求限流：避免触发坚果云安全限制
     // 坚果云免费版限制较严格，需要较长间隔
@@ -53,9 +57,10 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
                 config.getProperty("nutstore.username",
                         System.getenv("NUTSTORE_USERNAME")));
 
-        this.password = System.getProperty("nutstore.password",
+        String rawPassword = System.getProperty("nutstore.password",
                 config.getProperty("nutstore.password",
                         System.getenv("NUTSTORE_PASSWORD")));
+        this.password = decodePasswordIfNeeded(rawPassword);
 
         this.webdavBase = config.getProperty("nutstore.webdav.base", DEFAULT_WEBDAV_BASE);
         this.syncPath = config.getProperty("nutstore.sync.path", DEFAULT_SYNC_PATH);
@@ -70,6 +75,28 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
             logger.info("[NutstoreProvider] 同步路径: {}", syncRootUrl);
         } else {
             logger.warn("[NutstoreProvider] 坚果云未配置，请在 config.properties 中配置账号");
+        }
+    }
+
+    /**
+     * 兼容 UI 保存的 `b64:` 前缀 Base64 密码。
+     * - `b64:...`：解码后使用
+     * - 其它：按原样当明文使用（保持手工配置明文仍可用）
+     */
+    private String decodePasswordIfNeeded(String value) {
+        if (value == null || value.isEmpty()) {
+            return value;
+        }
+        if (!value.startsWith(B64_PREFIX)) {
+            return value;
+        }
+        String payload = value.substring(B64_PREFIX.length());
+        try {
+            byte[] decoded = Base64.getDecoder().decode(payload);
+            return new String(decoded, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            logger.warn("[NutstoreProvider] 解码 b64: 密码失败，按原样使用: {}", e.getMessage());
+            return value;
         }
     }
 

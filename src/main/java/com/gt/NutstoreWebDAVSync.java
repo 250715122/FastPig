@@ -6,9 +6,11 @@ import com.github.sardine.SardineFactory;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Base64;
 import java.util.Properties;
 
 /**
@@ -32,6 +34,8 @@ public class NutstoreWebDAVSync {
     // 默认 WebDAV 地址
     private static final String DEFAULT_WEBDAV_BASE = "https://dav.jianguoyun.com/dav/";
     private static final String DEFAULT_SYNC_PATH = "FastPig/fastpig.db";
+
+    private static final String B64_PREFIX = "b64:";
     
     private NutstoreWebDAVSync() {
         this.localDb = Paths.get(System.getProperty("user.dir"), "fastpig.db");
@@ -44,9 +48,10 @@ public class NutstoreWebDAVSync {
                         config.getProperty("nutstore.username", 
                         System.getenv("NUTSTORE_USERNAME")));
         
-        this.password = System.getProperty("nutstore.password", 
-                        config.getProperty("nutstore.password", 
+        String rawPassword = System.getProperty("nutstore.password",
+                        config.getProperty("nutstore.password",
                         System.getenv("NUTSTORE_PASSWORD")));
+        this.password = decodePasswordIfNeeded(rawPassword);
         
         String webdavBase = config.getProperty("nutstore.webdav.base", DEFAULT_WEBDAV_BASE);
         String syncPath = config.getProperty("nutstore.sync.path", DEFAULT_SYNC_PATH);
@@ -62,6 +67,28 @@ public class NutstoreWebDAVSync {
         } else {
             System.out.println("[WebDAV] 坚果云同步未配置");
             System.out.println("[WebDAV] 请在 config.properties 中配置账号信息");
+        }
+    }
+
+    /**
+     * 兼容 UI 保存的 `b64:` 前缀 Base64 密码。
+     * - `b64:...`：解码后使用
+     * - 其它：按原样当明文使用（保持手工配置明文仍可用）
+     */
+    private String decodePasswordIfNeeded(String value) {
+        if (value == null || value.isEmpty()) {
+            return value;
+        }
+        if (!value.startsWith(B64_PREFIX)) {
+            return value;
+        }
+        String payload = value.substring(B64_PREFIX.length());
+        try {
+            byte[] decoded = Base64.getDecoder().decode(payload);
+            return new String(decoded, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            System.err.println("[WebDAV] 解码 b64: 密码失败，按原样使用: " + e.getMessage());
+            return value;
         }
     }
     

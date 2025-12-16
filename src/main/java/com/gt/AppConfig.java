@@ -1,6 +1,7 @@
 package com.gt;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -19,6 +20,8 @@ public class AppConfig {
     private static AppConfig instance;
     private Properties properties;
     private final String configFilePath;
+
+    private static final String B64_PREFIX = "b64:";
     
     // ===== 配置项常量 =====
     
@@ -243,18 +246,35 @@ public class AppConfig {
      * 获取加密的密码
      */
     public String getEncryptedPassword(String key) {
-        String encoded = properties.getProperty(key);
-        if (encoded == null || encoded.isEmpty()) {
+        String stored = properties.getProperty(key);
+        if (stored == null || stored.isEmpty()) {
             return "";
         }
-        try {
-            // 简单的 Base64 解码
-            byte[] decoded = Base64.getDecoder().decode(encoded);
-            return new String(decoded);
-        } catch (Exception e) {
-            logger.warn("解码密码失败，返回原始值: {}", e.getMessage());
-            return encoded;
+
+        // 新格式：b64:xxxx
+        if (stored.startsWith(B64_PREFIX)) {
+            String payload = stored.substring(B64_PREFIX.length());
+            try {
+                byte[] decoded = Base64.getDecoder().decode(payload);
+                return new String(decoded, StandardCharsets.UTF_8);
+            } catch (Exception e) {
+                logger.warn("解码 b64: 密码失败，返回原始值: {}", e.getMessage());
+                return stored;
+            }
         }
+
+        // 兼容旧格式：无前缀 Base64（只在“明显像 Base64”时才尝试解码，避免误判明文密码）
+        if (looksLikeLegacyBase64(stored)) {
+            try {
+                byte[] decoded = Base64.getDecoder().decode(stored);
+                return new String(decoded, StandardCharsets.UTF_8);
+            } catch (Exception e) {
+                // 忽略，按明文返回
+            }
+        }
+
+        // 明文格式（推荐手工配置/历史值）
+        return stored;
     }
     
     /**
@@ -264,10 +284,40 @@ public class AppConfig {
         if (password == null || password.isEmpty()) {
             properties.remove(key);
         } else {
-            // 简单的 Base64 编码
-            String encoded = Base64.getEncoder().encodeToString(password.getBytes());
-            properties.setProperty(key, encoded);
+            // 新格式：b64: 前缀，避免与明文混淆
+            String encoded = Base64.getEncoder().encodeToString(password.getBytes(StandardCharsets.UTF_8));
+            properties.setProperty(key, B64_PREFIX + encoded);
         }
+    }
+
+    /**
+     * 旧版本曾直接把 Base64 字符串写入配置文件（无前缀）。
+     * 为避免把“看起来像 Base64 的明文密码”误解码，这里做一个更严格的判断：
+     * - 长度必须是 4 的倍数
+     * - 只包含 Base64 字符集 + '='
+     * - 且包含 '+'/'/' 或 '='（大多数明文密码不会包含这些）
+     */
+    private boolean looksLikeLegacyBase64(String value) {
+        if (value == null) {
+            return false;
+        }
+        int len = value.length();
+        if (len < 8 || (len % 4) != 0) {
+            return false;
+        }
+        boolean hasSpecial = false;
+        for (int i = 0; i < len; i++) {
+            char c = value.charAt(i);
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                continue;
+            }
+            if (c == '+' || c == '/' || c == '=') {
+                hasSpecial = true;
+                continue;
+            }
+            return false;
+        }
+        return hasSpecial;
     }
     
     /**
