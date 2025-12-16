@@ -63,6 +63,7 @@ public class NoteFileSync {
 
         logger.info("[NoteFileSync] 开始上传同步到云端...");
         long startTime = System.currentTimeMillis();
+        boolean overallOk = true;
 
         try {
             Path notesDir = fileStorage.getNotesDir();
@@ -73,7 +74,11 @@ public class NoteFileSync {
             logger.info("[NoteFileSync] 上次同步时间: " + new Date(lastSyncTime));
 
             // 确保云端根目录存在
-            cloudProvider.createDirectory("");
+            boolean rootOk = cloudProvider.createDirectory("");
+            if (!rootOk) {
+                logger.error("[NoteFileSync] 创建云端根目录失败，终止上传");
+                return false;
+            }
 
             int uploadedCount = 0;
             int skippedCount = 0;
@@ -136,16 +141,24 @@ public class NoteFileSync {
                     System.out.println("✓");
                 } else {
                     failedCount++;
+                    overallOk = false;
                     System.out.println("✗ 失败");
                 }
             }
 
-            // 更新同步时间
-            syncMeta.setLastSyncTime(System.currentTimeMillis());
+            // 保存元数据：
+            // - 无论整体是否成功，都保存已成功上传的条目，避免下次重复上传
+            // - 只有整体成功时才更新 lastSyncTime
+            if (overallOk) {
+                syncMeta.setLastSyncTime(System.currentTimeMillis());
+            }
             syncMeta.save(notesDir);
 
             // 上传 .sync_meta.json 到云端（用于跨设备版本比较）
-            uploadSyncMetaToCloud(syncMeta);
+            boolean metaOk = uploadSyncMetaToCloud(syncMeta);
+            if (!metaOk) {
+                overallOk = false;
+            }
 
             long elapsed = System.currentTimeMillis() - startTime;
             System.out.println("\n上传完成: 成功 " + uploadedCount + " 个" + 
@@ -165,7 +178,7 @@ public class NoteFileSync {
             System.out.println("==================\n");
             logger.info("[NoteFileSync] 上传同步完成: 成功 " + uploadedCount + " 个, 失败 " + failedCount + " 个, 冲突 " + conflictCount + " 个, 跳过 " + skippedCount + " 个, 耗时 " + elapsed + "ms");
 
-            return true;
+            return overallOk;
 
         } catch (Exception e) {
             logger.error("[NoteFileSync] 上传同步失败: " + e.getMessage());
@@ -870,15 +883,19 @@ public class NoteFileSync {
     /**
      * 上传 .sync_meta.json 到云端
      */
-    private void uploadSyncMetaToCloud(SyncMetadata syncMeta) {
+    private boolean uploadSyncMetaToCloud(SyncMetadata syncMeta) {
         try {
             String json = syncMeta.toJson();
             byte[] data = json.getBytes(StandardCharsets.UTF_8);
             if (cloudProvider.upload(".sync_meta.json", data)) {
                 logger.info("[NoteFileSync] 已上传 .sync_meta.json 到云端 (" + data.length + " bytes)");
+                return true;
             }
+            logger.error("[NoteFileSync] 上传 .sync_meta.json 失败（upload 返回 false）");
+            return false;
         } catch (Exception e) {
             logger.error("[NoteFileSync] 上传 .sync_meta.json 失败: " + e.getMessage());
+            return false;
         }
     }
 
