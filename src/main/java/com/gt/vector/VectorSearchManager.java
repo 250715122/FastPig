@@ -34,9 +34,11 @@ public class VectorSearchManager {
     private LuceneVectorSearchService searchService;
     private VectorSearchPanel searchPanel;
     private BiConsumer<String, String> onSelectCallback; // (noteKey, h1Title) -> void
+    private Window parentWindow; // 保存父窗口引用，用于显示下载提示
     
     private String lastQuery = "";
     private boolean indexingInProgress = false;
+    private boolean downloadPromptShown = false; // 避免重复弹出下载提示
     
     private VectorSearchManager() {
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -58,13 +60,17 @@ public class VectorSearchManager {
      * @param parent 父窗口（用于显示下载提示）
      */
     public void initialize(Window parent) {
+        this.parentWindow = parent; // 保存引用，用于后续显示下载提示
+        System.out.println("[VectorSearchManager] initialize() 被调用, parentWindow=" + (parent != null));
+        
         // 检查模型是否已下载
         if (!ModelManager.isModelDownloaded()) {
-            System.out.println("[VectorSearchManager] 模型未下载，向量检索功能不可用");
+            System.out.println("[VectorSearchManager] 模型未下载，向量检索功能暂不可用（等待用户触发下载）");
             return;
         }
         
         // 初始化服务
+        System.out.println("[VectorSearchManager] 模型已存在，开始初始化 EmbeddingService...");
         EmbeddingService.getInstance().initialize();
         searchService = VectorSearchFactory.getLuceneService();
         
@@ -85,6 +91,21 @@ public class VectorSearchManager {
             }
         } else {
             System.err.println("[VectorSearchManager] 向量检索服务初始化失败");
+            if (searchService != null) {
+                System.err.println("[VectorSearchManager] searchService.isAvailable() = " + searchService.isAvailable());
+                System.err.println("[VectorSearchManager] errorMessage = " + searchService.getErrorMessage());
+            }
+        }
+    }
+    
+    /**
+     * 重新初始化（模型下载完成后调用）
+     */
+    private void reinitialize() {
+        System.out.println("[VectorSearchManager] reinitialize() 被调用");
+        downloadPromptShown = false;
+        if (parentWindow != null) {
+            initialize(parentWindow);
         }
     }
     
@@ -111,7 +132,34 @@ public class VectorSearchManager {
      * @param component 触发组件（用于定位结果面板）
      */
     public void onInputChanged(String input, Component component) {
+        System.out.println("[VectorSearchManager] onInputChanged: input='" + input + "', isAvailable=" + isAvailable());
+        
+        // 如果服务不可用，检查是否因为模型未下载
         if (!isAvailable()) {
+            // 只在输入满足触发条件时才提示
+            if (isVectorSearchTrigger(input)) {
+                String query = extractQuery(input).trim();
+                if (query.length() >= MIN_QUERY_LENGTH) {
+                    if (!ModelManager.isModelDownloaded()) {
+                        // 模型未下载，提示用户下载
+                        System.out.println("[VectorSearchManager] 模型未下载，准备提示用户下载");
+                        if (parentWindow != null && !downloadPromptShown) {
+                            downloadPromptShown = true; // 避免重复弹出
+                            SwingUtilities.invokeLater(() -> {
+                                if (ModelManager.showDownloadPrompt(parentWindow)) {
+                                    ModelManager.downloadModelWithProgress(parentWindow, this::reinitialize);
+                                } else {
+                                    downloadPromptShown = false; // 用户取消后，下次可以再弹
+                                }
+                            });
+                        }
+                    } else {
+                        // 模型已下载但服务未初始化，尝试重新初始化
+                        System.out.println("[VectorSearchManager] 模型已下载但服务不可用，尝试重新初始化");
+                        reinitialize();
+                    }
+                }
+            }
             return;
         }
         
@@ -139,6 +187,8 @@ public class VectorSearchManager {
             return;
         }
         
+        System.out.println("[VectorSearchManager] 触发搜索: query='" + query + "'");
+        
         // 设置 debounce 任务
         debounceTask = scheduler.schedule(() -> {
             performSearch(query, component);
@@ -149,24 +199,26 @@ public class VectorSearchManager {
      * 执行搜索
      */
     private void performSearch(String query, Component component) {
+        System.out.println("[VectorSearchManager] performSearch: query='" + query + "'");
+        
         if (!isAvailable() || searchService == null) {
+            System.out.println("[VectorSearchManager] performSearch: 服务不可用，跳过搜索");
             return;
         }
         
         lastQuery = query;
         
         // 执行搜索
+        System.out.println("[VectorSearchManager] 开始向量检索...");
         List<LuceneVectorSearchService.VectorSearchResult> results = searchService.search(query, TOP_K);
+        System.out.println("[VectorSearchManager] 检索完成，结果数: " + results.size());
         
         // 在 EDT 中更新 UI
         SwingUtilities.invokeLater(() -> {
-            if (searchPanel != null && !results.isEmpty()) {
+            if (searchPanel != null) {
                 searchPanel.setResults(results, query);
                 searchPanel.showBelow(component);
-            } else if (searchPanel != null) {
-                // 无结果时也显示面板（显示"未找到"提示）
-                searchPanel.setResults(results, query);
-                searchPanel.showBelow(component);
+                System.out.println("[VectorSearchManager] 搜索面板已显示");
             }
         });
     }

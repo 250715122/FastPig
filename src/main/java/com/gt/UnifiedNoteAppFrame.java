@@ -1999,10 +1999,15 @@ public class UnifiedNoteAppFrame extends JFrame {
         String[] parsed = parseFirstLine(bodyArea.getText());
         String q = parsed[1].isEmpty()? parsed[2] : parsed[1];
         if (q == null) q = "";
+        
+        // 调试日志
+        System.out.println("[updateSuggestions] q='" + q + "', isVectorTrigger=" + VectorSearchManager.isVectorSearchTrigger(q));
+        
         if (q.isEmpty()) { suggestPopup.setVisible(false); return; }
         
         // 检查是否为向量检索触发（以 : 或 ： 开头）
         if (VectorSearchManager.isVectorSearchTrigger(q)) {
+            System.out.println("[updateSuggestions] 触发向量检索分支, q='" + q + "'");
             suggestPopup.setVisible(false);
             // 交给 VectorSearchManager 处理（带 debounce）
             VectorSearchManager.getInstance().onInputChanged(q, bodyArea);
