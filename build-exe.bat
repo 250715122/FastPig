@@ -63,6 +63,7 @@ if exist src\main\resources\icons\FastPig.ico (
 
 REM 4. 生成应用程序（无控制台窗口，带自定义图标）
 REM 注意：使用 --verbose 来查看详细输出
+REM 使用 jlink 裁剪 JRE，只包含必要的 Java 模块，大幅减小打包体积
 call "%JPACKAGE%" ^
     --input target ^
     --name FastPig ^
@@ -71,6 +72,8 @@ call "%JPACKAGE%" ^
     --type app-image ^
     --dest . ^
     --icon target\FastPig.ico ^
+    --add-modules java.base,java.desktop,java.sql,java.logging,java.naming,java.xml,java.datatransfer,java.prefs,jdk.unsupported ^
+    --jlink-options "--strip-debug --no-man-pages --no-header-files --compress=2" ^
     --verbose
 
 if errorlevel 1 (

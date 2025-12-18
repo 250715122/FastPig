@@ -71,13 +71,24 @@
 		    <version>3.45.1.0</version>
 		</dependency>
 
-		<!-- Markdown Parser (flexmark) -->
+		<!-- Markdown Parser (flexmark) - 只引入实际需要的模块，避免引入 icu4j/pdfbox 等大依赖 -->
 		<dependency>
 		    <groupId>com.vladsch.flexmark</groupId>
-		    <artifactId>flexmark-all</artifactId>
+		    <artifactId>flexmark</artifactId>
 		    <version>0.64.8</version>
 		</dependency>
-
+		<!-- 表格扩展 -->
+		<dependency>
+		    <groupId>com.vladsch.flexmark</groupId>
+		    <artifactId>flexmark-ext-tables</artifactId>
+		    <version>0.64.8</version>
+		</dependency>
+		<!-- 属性扩展 -->
+		<dependency>
+		    <groupId>com.vladsch.flexmark</groupId>
+		    <artifactId>flexmark-ext-attributes</artifactId>
+		    <version>0.64.8</version>
+		</dependency>
 		<!-- HTML -> Markdown 转换（用于粘贴保留样式） -->
 		<dependency>
 		    <groupId>com.vladsch.flexmark</groupId>
