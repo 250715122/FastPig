@@ -12,11 +12,12 @@ import java.util.Properties;
  * 根据配置创建对应的向量检索实现
  * 
  * 配置示例 (config.properties):
- * vector.provider=none | sqlite-vec | lucene
+ * vector.provider=none | lucene
  */
 public class VectorSearchFactory {
 
     private static VectorSearchService instance;
+    private static LuceneVectorSearchService luceneService;
 
     /**
      * 获取向量检索服务实例（单例）
@@ -27,11 +28,31 @@ public class VectorSearchFactory {
         }
         return instance;
     }
+    
+    /**
+     * 获取 Lucene 向量检索服务（用于 H1 级别索引）
+     */
+    public static synchronized LuceneVectorSearchService getLuceneService() {
+        if (luceneService == null) {
+            Properties config = loadConfig();
+            String providerName = config.getProperty("vector.provider", "none").toLowerCase().trim();
+            
+            if ("lucene".equals(providerName)) {
+                luceneService = new LuceneVectorSearchService();
+                luceneService.initialize();
+            }
+        }
+        return luceneService;
+    }
 
     /**
      * 重新创建服务（用于配置变更后刷新）
      */
     public static synchronized void refresh() {
+        if (luceneService != null) {
+            luceneService.close();
+            luceneService = null;
+        }
         instance = null;
     }
 
@@ -45,15 +66,16 @@ public class VectorSearchFactory {
         System.out.println("[VectorSearchFactory] 向量检索提供者: " + providerName);
 
         switch (providerName) {
-            case "sqlite-vec":
-                // TODO: 实现 sqlite-vec 提供者
-                System.out.println("[VectorSearchFactory] sqlite-vec 暂未实现，使用空实现");
-                return NoOpVectorSearchService.getInstance();
-
             case "lucene":
-                // TODO: 实现 Lucene 提供者
-                System.out.println("[VectorSearchFactory] Lucene 暂未实现，使用空实现");
-                return NoOpVectorSearchService.getInstance();
+                LuceneVectorSearchService service = new LuceneVectorSearchService();
+                service.initialize();
+                if (service.isAvailable()) {
+                    luceneService = service;
+                    return service;
+                } else {
+                    System.err.println("[VectorSearchFactory] Lucene 初始化失败: " + service.getErrorMessage());
+                    return NoOpVectorSearchService.getInstance();
+                }
 
             case "none":
             case "disabled":

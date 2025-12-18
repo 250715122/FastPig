@@ -46,6 +46,9 @@ import org.scilab.forge.jlatexmath.TeXIcon;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.gt.vector.VectorSearchManager;
+import com.gt.vector.NoteH1Parser;
+
 public class UnifiedNoteAppFrame extends JFrame {
     
     private static final Logger logger = LogManager.getLogger(UnifiedNoteAppFrame.class);
@@ -349,6 +352,29 @@ public class UnifiedNoteAppFrame extends JFrame {
             
             @Override public void keyReleased(java.awt.event.KeyEvent e){
                 int code = e.getKeyCode();
+                VectorSearchManager vsm = VectorSearchManager.getInstance();
+                
+                // 向量检索结果导航
+                if (vsm.isResultsVisible()) {
+                    if (code == java.awt.event.KeyEvent.VK_DOWN) {
+                        vsm.selectNext();
+                        return;
+                    }
+                    if (code == java.awt.event.KeyEvent.VK_UP) {
+                        vsm.selectPrevious();
+                        return;
+                    }
+                    if (code == java.awt.event.KeyEvent.VK_ENTER) {
+                        vsm.confirmSelection();
+                        return;
+                    }
+                    if (code == java.awt.event.KeyEvent.VK_ESCAPE) {
+                        vsm.hideResults();
+                        return;
+                    }
+                }
+                
+                // 普通建议列表导航
                 if (code==java.awt.event.KeyEvent.VK_DOWN){
                     if (suggestModel.size()>0){
                         suggestSelectedIndex = (suggestSelectedIndex + 1 + suggestModel.size()) % suggestModel.size();
@@ -789,6 +815,94 @@ public class UnifiedNoteAppFrame extends JFrame {
         
         // 初始化 all 命令（生成所有命令的清单）
         initializeAllCommand();
+        
+        // 初始化向量检索服务
+        initVectorSearch();
+    }
+    
+    /**
+     * 初始化向量检索服务
+     */
+    private void initVectorSearch() {
+        // 在后台线程初始化，避免阻塞 UI
+        new Thread(() -> {
+            try {
+                VectorSearchManager vsm = VectorSearchManager.getInstance();
+                vsm.initialize(UnifiedNoteAppFrame.this);
+                
+                // 设置选择回调
+                vsm.setOnSelectCallback((noteKey, h1Title) -> {
+                    SwingUtilities.invokeLater(() -> {
+                        openNoteAndJumpToH1(noteKey, h1Title);
+                    });
+                });
+                
+                // 应用主题
+                vsm.applyTheme(ThemeManager.getInstance().getCurrentTheme() == ThemeManager.Theme.DARK);
+                
+                System.out.println("[UnifiedNoteAppFrame] 向量检索服务初始化完成");
+            } catch (Exception e) {
+                System.err.println("[UnifiedNoteAppFrame] 向量检索服务初始化失败: " + e.getMessage());
+            }
+        }, "VectorSearch-Init").start();
+    }
+    
+    /**
+     * 打开笔记并跳转到指定 H1 标题位置
+     */
+    private void openNoteAndJumpToH1(String noteKey, String h1Title) {
+        // 清空首行输入
+        clearFirstLine();
+        
+        // 加载笔记
+        NoteDto note = repository.findByKey(noteKey);
+        if (note == null) {
+            ToastNotification.showError(this, "未找到笔记: " + noteKey);
+            return;
+        }
+        
+        loadNote(note);
+        
+        // 如果有 H1 标题，定位到该位置
+        if (h1Title != null && !h1Title.isEmpty()) {
+            String content = bodyArea.getText();
+            int pos = NoteH1Parser.findH1Position(content, h1Title);
+            
+            if (pos >= 0) {
+                // 设置光标位置
+                bodyArea.setCaretPosition(pos);
+                
+                // 将目标行滚动到视窗中间
+                try {
+                    Rectangle viewRect = bodyArea.modelToView(pos);
+                    if (viewRect != null && bodyScrollPane != null) {
+                        JViewport viewport = bodyScrollPane.getViewport();
+                        int viewHeight = viewport.getHeight();
+                        int targetY = viewRect.y - viewHeight / 2;
+                        if (targetY < 0) targetY = 0;
+                        viewport.setViewPosition(new Point(0, targetY));
+                    }
+                } catch (Exception e) {
+                    // 滚动失败时至少确保可见
+                    bodyArea.requestFocusInWindow();
+                }
+            }
+        }
+        
+        bodyArea.requestFocusInWindow();
+    }
+    
+    /**
+     * 清空首行（向量检索选择后）
+     */
+    private void clearFirstLine() {
+        String text = bodyArea.getText();
+        int nl = text.indexOf('\n');
+        if (nl >= 0) {
+            bodyArea.setText(text.substring(nl + 1));
+        } else {
+            bodyArea.setText("");
+        }
     }
 
     private boolean previewVisible = false;
@@ -1886,6 +2000,16 @@ public class UnifiedNoteAppFrame extends JFrame {
         String q = parsed[1].isEmpty()? parsed[2] : parsed[1];
         if (q == null) q = "";
         if (q.isEmpty()) { suggestPopup.setVisible(false); return; }
+        
+        // 检查是否为向量检索触发（以 : 或 ： 开头）
+        if (VectorSearchManager.isVectorSearchTrigger(q)) {
+            suggestPopup.setVisible(false);
+            // 交给 VectorSearchManager 处理（带 debounce）
+            VectorSearchManager.getInstance().onInputChanged(q, bodyArea);
+            return;
+        }
+        
+        // 普通首字母/前缀匹配
         // 优先 key 前缀，无结果再按描述包含
         List<NoteDto> list = repository.searchByKeyPrefix(q, 20);
         if (list.isEmpty()) list = repository.searchByDescContains(q, 20);
@@ -4058,6 +4182,11 @@ public class UnifiedNoteAppFrame extends JFrame {
         
         // 刷新窗口内容区域
         getContentPane().setBackground(UIColors.BG_PRIMARY);
+        
+        // 应用向量检索面板主题
+        VectorSearchManager.getInstance().applyTheme(
+            themeManager.getCurrentTheme() == ThemeManager.Theme.DARK
+        );
         
         // 重绘所有组件
         repaint();
