@@ -23,9 +23,9 @@ public class EmbeddingService {
     private static final int VECTOR_DIM = 512;
     private static final int MAX_SEQ_LENGTH = 512;
     
-    // 模型下载 URL（使用 HuggingFace 镜像）
-    private static final String MODEL_URL = "https://huggingface.co/BAAI/bge-small-zh-v1.5/resolve/main/onnx/model.onnx";
-    private static final String VOCAB_URL = "https://huggingface.co/BAAI/bge-small-zh-v1.5/resolve/main/vocab.txt";
+    // 模型下载 URL（使用 Xenova 转换的 ONNX 版本）
+    private static final String MODEL_URL = "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model.onnx";
+    private static final String VOCAB_URL = "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/vocab.txt";
     
     private static EmbeddingService instance;
     
