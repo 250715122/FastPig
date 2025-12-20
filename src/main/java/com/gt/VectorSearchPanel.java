@@ -4,6 +4,7 @@ import com.gt.vector.LuceneVectorSearchService.VectorSearchResult;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.text.BadLocationException;
 import java.awt.*;
 import java.awt.event.*;
 import java.util.List;
@@ -27,13 +28,23 @@ public class VectorSearchPanel extends JWindow {
     private Color selectionColor = new Color(70, 130, 180);
     private Color borderColor = new Color(80, 80, 80);
     
+    // 跟随主窗口移动
+    private JTextArea targetTextArea;
+    private Window ownerWindow;
+    private ComponentListener ownerListener;
+    
     public VectorSearchPanel(Window owner) {
         super(owner);
+        this.ownerWindow = owner;
         initComponents();
+        setupOwnerListener();
     }
     
     private void initComponents() {
-        setAlwaysOnTop(true);
+        // 不设置 AlwaysOnTop，让面板跟随主窗口的 z-order
+        // 切换窗口时面板会正常被其他窗口遮盖
+        // 禁止窗口获取焦点，保持输入框焦点
+        setFocusableWindowState(false);
         
         // 主面板
         JPanel mainPanel = new JPanel(new BorderLayout());
@@ -58,8 +69,9 @@ public class VectorSearchPanel extends JWindow {
         resultList.setForeground(foregroundColor);
         resultList.setSelectionBackground(selectionColor);
         resultList.setSelectionForeground(Color.WHITE);
-        resultList.setFixedCellHeight(50);
+        resultList.setFixedCellHeight(28); // 单行显示
         resultList.setBorder(null);
+        resultList.setFocusable(false); // 禁止列表获取焦点
         
         // 列表选择事件
         resultList.addMouseListener(new MouseAdapter() {
@@ -82,12 +94,8 @@ public class VectorSearchPanel extends JWindow {
             }
         });
         
-        JScrollPane scrollPane = new JScrollPane(resultList);
-        scrollPane.setBorder(null);
-        scrollPane.setBackground(backgroundColor);
-        scrollPane.getViewport().setBackground(backgroundColor);
-        scrollPane.setPreferredSize(new Dimension(450, 300));
-        mainPanel.add(scrollPane, BorderLayout.CENTER);
+        // 直接添加列表，不使用滚动条
+        mainPanel.add(resultList, BorderLayout.CENTER);
         
         // 状态栏
         statusLabel = new JLabel(" ");
@@ -98,6 +106,64 @@ public class VectorSearchPanel extends JWindow {
         
         add(mainPanel);
         pack();
+    }
+    
+    /**
+     * 设置主窗口监听器，实现面板跟随主窗口移动
+     */
+    private void setupOwnerListener() {
+        if (ownerWindow == null) return;
+        
+        ownerListener = new ComponentAdapter() {
+            @Override
+            public void componentMoved(ComponentEvent e) {
+                updatePosition();
+            }
+            
+            @Override
+            public void componentResized(ComponentEvent e) {
+                updatePosition();
+            }
+        };
+        
+        ownerWindow.addComponentListener(ownerListener);
+    }
+    
+    /**
+     * 更新面板位置（跟随主窗口）
+     */
+    private void updatePosition() {
+        if (!isVisible() || targetTextArea == null) {
+            return;
+        }
+        
+        try {
+            // 宽度为编辑区的一半
+            int panelWidth = targetTextArea.getWidth() / 2;
+            setSize(panelWidth, getHeight());
+            
+            Rectangle caretRect = targetTextArea.modelToView(targetTextArea.getCaretPosition());
+            if (caretRect == null) return;
+            
+            Point screenLoc = targetTextArea.getLocationOnScreen();
+            int x = screenLoc.x;
+            int y = screenLoc.y + caretRect.y + caretRect.height + 5;
+            
+            Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+            if (x + panelWidth > screenSize.width) {
+                x = screenSize.width - panelWidth;
+            }
+            if (y + getHeight() > screenSize.height) {
+                y = screenLoc.y + caretRect.y - getHeight() - 5;
+            }
+            if (y < 0) {
+                y = 0;
+            }
+            
+            setLocation(x, y);
+        } catch (Exception e) {
+            // 忽略位置更新异常
+        }
     }
     
     /**
@@ -132,7 +198,7 @@ public class VectorSearchPanel extends JWindow {
     public void showAt(int x, int y) {
         setLocation(x, y);
         setVisible(true);
-        resultList.requestFocusInWindow();
+        // 不获取焦点，让输入框保持焦点以便继续输入
     }
     
     /**
@@ -156,10 +222,64 @@ public class VectorSearchPanel extends JWindow {
     }
     
     /**
+     * 显示在文本区域的光标下方
+     * @param textArea 文本区域组件
+     */
+    public void showBelowCaret(JTextArea textArea) {
+        // 保存引用，用于跟随主窗口移动时重新计算位置
+        this.targetTextArea = textArea;
+        
+        try {
+            // 宽度为编辑区的一半
+            int panelWidth = textArea.getWidth() / 2;
+            // 高度根据结果数量动态计算：行高 * 数量 + 标题 + 状态栏 + 边距
+            int rowHeight = 28;
+            int headerHeight = 25; // 标题高度
+            int statusHeight = 20; // 状态栏高度
+            int padding = 20; // 边距
+            int itemCount = listModel.size();
+            int panelHeight = headerHeight + (rowHeight * itemCount) + statusHeight + padding;
+            
+            // 获取光标位置的矩形
+            Rectangle caretRect = textArea.modelToView(textArea.getCaretPosition());
+            if (caretRect == null) {
+                // 回退到组件下方显示
+                showBelow(textArea);
+                return;
+            }
+            
+            // 计算屏幕坐标 - x 与编辑区左边对齐
+            Point screenLoc = textArea.getLocationOnScreen();
+            int x = screenLoc.x;
+            int y = screenLoc.y + caretRect.y + caretRect.height + 5; // 光标下方 5 像素
+            
+            // 确保不超出屏幕
+            Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+            if (x + panelWidth > screenSize.width) {
+                x = screenSize.width - panelWidth;
+            }
+            if (y + panelHeight > screenSize.height) {
+                // 如果下方空间不够，显示在光标上方
+                y = screenLoc.y + caretRect.y - panelHeight - 5;
+            }
+            if (y < 0) {
+                y = 0;
+            }
+            
+            setSize(panelWidth, panelHeight);
+            showAt(x, y);
+        } catch (BadLocationException e) {
+            // 发生异常时回退到组件下方显示
+            showBelow(textArea);
+        }
+    }
+    
+    /**
      * 隐藏面板
      */
     public void hidePanel() {
         setVisible(false);
+        targetTextArea = null; // 清除引用
     }
     
     /**
@@ -222,6 +342,9 @@ public class VectorSearchPanel extends JWindow {
     
     /**
      * 结果列表单元格渲染器
+     * 格式：描述 | H1标题          [笔记名] | V:0.66 K:0.15 T:0.81
+     * 左侧：描述 | H1标题
+     * 右侧：[笔记名] | V(向量) K(关键词) T(总分)
      */
     private class ResultCellRenderer extends DefaultListCellRenderer {
         @Override
@@ -230,43 +353,47 @@ public class VectorSearchPanel extends JWindow {
             
             VectorSearchResult result = (VectorSearchResult) value;
             
-            JPanel panel = new JPanel(new BorderLayout(5, 2));
-            panel.setBorder(new EmptyBorder(5, 8, 5, 8));
+            // 使用 JPanel + BorderLayout 实现左右布局
+            JPanel panel = new JPanel(new BorderLayout());
+            panel.setBorder(new EmptyBorder(4, 8, 4, 8));
             
+            // 左侧：描述 | H1标题
+            StringBuilder leftText = new StringBuilder();
+            if (result.noteDesc != null && !result.noteDesc.isEmpty()) {
+                leftText.append(result.noteDesc);
+            }
+            // 处理特殊标记：__NOTE_NAME__ 显示为空（笔记名索引不显示 H1 标题）
+            String displayH1 = result.h1Title;
+            if ("__NOTE_NAME__".equals(displayH1)) {
+                displayH1 = "";  // 笔记名索引不显示标题
+            }
+            if (displayH1 != null && !displayH1.isEmpty()) {
+                if (leftText.length() > 0) leftText.append(" | ");
+                leftText.append(displayH1);
+            }
+            
+            JLabel leftLabel = new JLabel(leftText.toString());
+            leftLabel.setFont(leftLabel.getFont().deriveFont(12f));
+            
+            // 右侧：[笔记名] | V:向量 K:关键词 T:总分
+            String rightText = String.format("[%s] | V:%.2f K:%.2f T:%.2f", 
+                result.noteKey, result.score, result.keywordScore, result.totalScore);
+            JLabel rightLabel = new JLabel(rightText);
+            rightLabel.setFont(rightLabel.getFont().deriveFont(11f));
+            
+            // 设置颜色
             if (isSelected) {
                 panel.setBackground(selectionColor);
+                leftLabel.setForeground(Color.WHITE);
+                rightLabel.setForeground(new Color(200, 200, 200));
             } else {
                 panel.setBackground(backgroundColor);
+                leftLabel.setForeground(foregroundColor);
+                rightLabel.setForeground(new Color(150, 150, 150));
             }
             
-            // 标题行：[笔记名] H1 标题
-            String title = result.h1Title;
-            if (title == null || title.isEmpty()) {
-                title = "(无标题)";
-            }
-            String displayTitle = String.format("[%s] %s", result.noteKey, title);
-            
-            JLabel titleLabel = new JLabel(displayTitle);
-            titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 13f));
-            titleLabel.setForeground(isSelected ? Color.WHITE : foregroundColor);
-            panel.add(titleLabel, BorderLayout.NORTH);
-            
-            // 内容预览
-            String preview = result.content != null ? result.content : "";
-            if (preview.length() > 80) {
-                preview = preview.substring(0, 80) + "...";
-            }
-            
-            JLabel contentLabel = new JLabel(preview);
-            contentLabel.setFont(contentLabel.getFont().deriveFont(11f));
-            contentLabel.setForeground(isSelected ? new Color(220, 220, 220) : new Color(150, 150, 150));
-            panel.add(contentLabel, BorderLayout.CENTER);
-            
-            // 分数
-            JLabel scoreLabel = new JLabel(String.format("%.2f", result.score));
-            scoreLabel.setFont(scoreLabel.getFont().deriveFont(10f));
-            scoreLabel.setForeground(isSelected ? new Color(200, 200, 200) : new Color(120, 120, 120));
-            panel.add(scoreLabel, BorderLayout.EAST);
+            panel.add(leftLabel, BorderLayout.WEST);
+            panel.add(rightLabel, BorderLayout.EAST);
             
             return panel;
         }

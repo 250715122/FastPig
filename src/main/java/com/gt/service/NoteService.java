@@ -2,15 +2,22 @@ package com.gt.service;
 
 import com.gt.NoteDto;
 import com.gt.NoteRepository;
+import com.gt.cloud.CloudStorageFactory;
+import com.gt.cloud.CloudStorageProvider;
 import com.gt.storage.NoteFileStorage;
+import com.gt.vector.VectorSearchManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 笔记业务服务
@@ -65,6 +72,9 @@ public class NoteService {
 
         // 更新索引（不存储正文，只存储元数据）
         repository.saveIndex(note);
+
+        // 更新向量索引（异步），使用描述而非标题
+        VectorSearchManager.getInstance().indexNote(note.key, note.desc, note.bodyMd);
 
         logger.info("[NoteService] 已保存笔记: " + note.key + " (id=" + note.id + ", version=" + note.version + ")");
     }
@@ -146,6 +156,9 @@ public class NoteService {
             note.deleted = true;
             note.updatedAt = System.currentTimeMillis();
             fileStorage.saveToFile(note);
+            
+            // 移除向量索引
+            VectorSearchManager.getInstance().removeNoteIndex(note.key);
         }
 
         logger.info("[NoteService] 已删除笔记: " + id);
@@ -268,6 +281,92 @@ public class NoteService {
      */
     public NoteFileStorage getFileStorage() {
         return fileStorage;
+    }
+
+    /**
+     * 清理孤立笔记
+     * 删除文件系统中存在但数据库中不存在的笔记文件夹
+     * 同时删除云端对应的文件夹
+     */
+    public int cleanupOrphanedNotes() {
+        logger.info("[NoteService] 开始清理孤立笔记...");
+        
+        Path notesDir = fileStorage.getNotesDir();
+        if (!Files.exists(notesDir)) {
+            logger.info("[NoteService] notes 目录不存在，跳过清理");
+            return 0;
+        }
+        
+        int deletedCount = 0;
+        
+        // 获取云存储提供者
+        CloudStorageProvider cloudProvider = CloudStorageFactory.getProvider();
+        boolean cloudEnabled = cloudProvider != null && cloudProvider.isEnabled();
+        
+        try {
+            // 获取数据库中所有笔记的 key
+            List<NoteDto> allNotes = repository.findAllCommandsAndDescriptions();
+            Set<String> dbKeys = allNotes.stream()
+                .map(n -> n.key)
+                .filter(k -> k != null)
+                .collect(Collectors.toSet());
+            
+            logger.info("[NoteService] 数据库中有 {} 个笔记", dbKeys.size());
+            
+            // 扫描 notes 目录下的所有文件夹
+            try (var stream = Files.list(notesDir)) {
+                List<Path> folders = stream.filter(Files::isDirectory).toList();
+                
+                for (Path folder : folders) {
+                    String folderName = folder.getFileName().toString();
+                    
+                    // 跳过隐藏文件夹（以 . 开头）
+                    if (folderName.startsWith(".")) {
+                        continue;
+                    }
+                    
+                    // 检查数据库中是否存在
+                    if (!dbKeys.contains(folderName)) {
+                        logger.info("[NoteService] 发现孤立笔记: {}", folderName);
+                        
+                        try {
+                            // 1. 先删除云端（如果启用了云同步）
+                            if (cloudEnabled) {
+                                boolean cloudDeleted = cloudProvider.delete(folderName);
+                                if (cloudDeleted) {
+                                    logger.info("[NoteService] 已从云端删除孤立笔记: {}", folderName);
+                                } else {
+                                    logger.warn("[NoteService] 云端删除失败，继续删除本地: {}", folderName);
+                                }
+                            }
+                            
+                            // 2. 再删除本地
+                            deleteFolder(folder);
+                            deletedCount++;
+                            logger.info("[NoteService] 已删除孤立笔记: {}", folderName);
+                        } catch (Exception e) {
+                            logger.error("[NoteService] 删除孤立笔记失败: {} - {}", folderName, e.getMessage());
+                        }
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            logger.error("[NoteService] 清理孤立笔记失败: {}", e.getMessage(), e);
+        }
+        
+        logger.info("[NoteService] 清理完成，删除了 {} 个孤立笔记", deletedCount);
+        return deletedCount;
+    }
+    
+    /**
+     * 递归删除文件夹
+     */
+    private void deleteFolder(Path folder) throws Exception {
+        Files.walk(folder)
+            .sorted(Comparator.reverseOrder())
+            .map(Path::toFile)
+            .forEach(File::delete);
     }
 
 }

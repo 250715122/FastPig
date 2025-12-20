@@ -247,6 +247,9 @@ public class UnifiedNoteAppFrame extends JFrame {
     private MultiCursorManager multiCursorManager;
 
     private NoteDto current;
+    
+    // 加载笔记时的标志位，防止加载时触发自动保存
+    private volatile boolean isLoading = false;
 
     public UnifiedNoteAppFrame(NoteRepository repository) {
         super("迅猪");
@@ -512,9 +515,18 @@ public class UnifiedNoteAppFrame extends JFrame {
         });
         autosaveTimer.setRepeats(false);
         bodyArea.getDocument().addDocumentListener(new javax.swing.event.DocumentListener(){
-            public void insertUpdate(javax.swing.event.DocumentEvent e){ autosaveTimer.restart(); updateEditorStatus(); }
-            public void removeUpdate(javax.swing.event.DocumentEvent e){ autosaveTimer.restart(); updateEditorStatus(); }
-            public void changedUpdate(javax.swing.event.DocumentEvent e){ autosaveTimer.restart(); updateEditorStatus(); }
+            public void insertUpdate(javax.swing.event.DocumentEvent e){ 
+                if (!isLoading) autosaveTimer.restart(); // 加载笔记时不触发自动保存
+                updateEditorStatus(); 
+            }
+            public void removeUpdate(javax.swing.event.DocumentEvent e){ 
+                if (!isLoading) autosaveTimer.restart(); 
+                updateEditorStatus(); 
+            }
+            public void changedUpdate(javax.swing.event.DocumentEvent e){ 
+                if (!isLoading) autosaveTimer.restart(); 
+                updateEditorStatus(); 
+            }
         });
         
         // 为普通编辑模式的目录更新添加去抖定时器
@@ -2005,7 +2017,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         
         if (q.isEmpty()) { suggestPopup.setVisible(false); return; }
         
-        // 检查是否为向量检索触发（以 : 或 ： 开头）
+        // 检查是否为向量检索触发（直接输入触发，: 或 ： 开头不触发）
         if (VectorSearchManager.isVectorSearchTrigger(q)) {
             System.out.println("[updateSuggestions] 触发向量检索分支, q='" + q + "'");
             suggestPopup.setVisible(false);
@@ -2014,10 +2026,16 @@ public class UnifiedNoteAppFrame extends JFrame {
             return;
         }
         
+        // 快捷命令匹配：去掉 : 或 ： 前缀
+        String searchKey = q;
+        if (q.startsWith(":") || q.startsWith("：")) {
+            searchKey = q.substring(1);
+        }
+        
         // 普通首字母/前缀匹配
         // 优先 key 前缀，无结果再按描述包含
-        List<NoteDto> list = repository.searchByKeyPrefix(q, 20);
-        if (list.isEmpty()) list = repository.searchByDescContains(q, 20);
+        List<NoteDto> list = repository.searchByKeyPrefix(searchKey, 20);
+        if (list.isEmpty()) list = repository.searchByDescContains(searchKey, 20);
         suggestModel.clear();
         for (NoteDto n : list){
             String key = (n.key!=null?n.key:"");
@@ -2071,24 +2089,29 @@ public class UnifiedNoteAppFrame extends JFrame {
 
     private void loadNote(NoteDto n){
         if (n == null) return;
-        // 确保从文件加载最新正文
+        isLoading = true; // 开始加载，防止触发自动保存
         try {
-            NoteDto full = noteService.load(n.id);
-            if (full != null) {
-                n = full;
+            // 确保从文件加载最新正文
+            try {
+                NoteDto full = noteService.load(n.id);
+                if (full != null) {
+                    n = full;
+                }
+            } catch (Exception e) {
+                System.err.println("加载笔记正文失败: " + n.id + " - " + e.getMessage());
             }
-        } catch (Exception e) {
-            System.err.println("加载笔记正文失败: " + n.id + " - " + e.getMessage());
+            current = n;
+            String first = (n.key==null? "" : n.key) + (n.desc!=null && !n.desc.isEmpty()? (" " + n.desc) : "");
+            String body = n.bodyMd==null? "" : n.bodyMd;
+            if (!body.startsWith("\n") && !body.isEmpty()) body = "\n" + body;
+            bodyArea.setText(first + body);
+            // 将光标移到文档开头（首行末尾）
+            bodyArea.setCaretPosition(first.length());
+            updateFirstLineHighlight();
+            updateEditorStatus();
+        } finally {
+            isLoading = false; // 加载完成
         }
-        current = n;
-        String first = (n.key==null? "" : n.key) + (n.desc!=null && !n.desc.isEmpty()? (" " + n.desc) : "");
-        String body = n.bodyMd==null? "" : n.bodyMd;
-        if (!body.startsWith("\n") && !body.isEmpty()) body = "\n" + body;
-        bodyArea.setText(first + body);
-        // 将光标移到文档开头（首行末尾）
-        bodyArea.setCaretPosition(first.length());
-        updateFirstLineHighlight();
-        updateEditorStatus();
     }
 
     private void doSearchFromFirstLine() {

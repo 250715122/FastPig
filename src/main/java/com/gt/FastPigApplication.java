@@ -66,6 +66,10 @@ public class FastPigApplication extends JFrame {
         // 设置 DbSyncService 的 NoteService 引用
         DbSyncService.getInstance().setNoteService(noteService);
         
+        // 启动时清理孤立笔记（文件系统存在但数据库不存在的笔记）
+        logger.info("清理孤立笔记...");
+        noteService.cleanupOrphanedNotes();
+        
         // 启动统一界面（先显示 GUI，同步在后台执行）
         UnifiedNoteAppFrame unified = new UnifiedNoteAppFrame(repo);
         unified.setVisible(true);

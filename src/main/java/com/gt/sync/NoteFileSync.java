@@ -146,6 +146,9 @@ public class NoteFileSync {
                 }
             }
 
+            // 处理已删除的笔记：同步删除云端
+            int deletedCount = syncDeletedNotesToCloud(notesDir, syncMeta);
+
             // 保存元数据：
             // - 无论整体是否成功，都保存已成功上传的条目，避免下次重复上传
             // - 只有整体成功时才更新 lastSyncTime
@@ -164,6 +167,7 @@ public class NoteFileSync {
             System.out.println("\n上传完成: 成功 " + uploadedCount + " 个" + 
                 (failedCount > 0 ? ", 失败 " + failedCount + " 个" : "") + 
                 (conflictCount > 0 ? ", 冲突 " + conflictCount + " 个" : "") +
+                (deletedCount > 0 ? ", 删除 " + deletedCount + " 个" : "") +
                 ", 耗时 " + (elapsed / 1000.0) + " 秒");
             
             // 如果有冲突，提示用户
@@ -185,6 +189,125 @@ public class NoteFileSync {
             e.printStackTrace();
             return false;
         }
+    }
+
+    /**
+     * 同步删除已标记为 deleted 的笔记到云端
+     * @param notesDir 本地笔记目录
+     * @param syncMeta 同步元数据
+     * @return 成功删除的笔记数量
+     */
+    private int syncDeletedNotesToCloud(Path notesDir, SyncMetadata syncMeta) {
+        int deletedCount = 0;
+        java.util.List<Path> toDelete = new java.util.ArrayList<>();
+        
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(notesDir)) {
+            for (Path folderPath : stream) {
+                if (!Files.isDirectory(folderPath)) continue;
+                String folderName = folderPath.getFileName().toString();
+                if (folderName.startsWith(".")) continue;
+                
+                // 检查该笔记是否被标记为已删除
+                Path noteFile = folderPath.resolve("note.md");
+                if (Files.exists(noteFile)) {
+                    try {
+                        String content = Files.readString(noteFile);
+                        if (isNoteDeleted(content)) {
+                            toDelete.add(folderPath);
+                        }
+                    } catch (IOException e) {
+                        logger.warn("[NoteFileSync] 读取笔记文件失败: " + noteFile);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            logger.error("[NoteFileSync] 遍历笔记目录失败: " + e.getMessage());
+            return 0;
+        }
+        
+        if (toDelete.isEmpty()) {
+            return 0;
+        }
+        
+        System.out.println("\n=== [云同步删除] ===");
+        System.out.println("需要删除: " + toDelete.size() + " 个已删除的笔记");
+        
+        for (Path folderPath : toDelete) {
+            String folderName = folderPath.getFileName().toString();
+            System.out.print("  删除 " + folderName + " ... ");
+            
+            try {
+                // 1. 删除云端目录
+                boolean cloudDeleted = cloudProvider.delete(folderName);
+                if (cloudDeleted) {
+                    logger.info("[NoteFileSync] 已删除云端笔记: " + folderName);
+                }
+                
+                // 2. 删除本地目录（彻底删除）
+                deleteLocalFolder(folderPath);
+                
+                // 3. 从元数据中移除
+                syncMeta.getFiles().remove(folderName);
+                
+                deletedCount++;
+                System.out.println("✓");
+                
+            } catch (Exception e) {
+                System.out.println("✗ 失败: " + e.getMessage());
+                logger.error("[NoteFileSync] 删除笔记失败: " + folderName + " - " + e.getMessage());
+            }
+        }
+        
+        if (deletedCount > 0) {
+            logger.info("[NoteFileSync] 已从云端删除 " + deletedCount + " 个笔记");
+        }
+        
+        return deletedCount;
+    }
+    
+    /**
+     * 检查笔记内容是否标记为已删除
+     */
+    private boolean isNoteDeleted(String content) {
+        if (content == null || !content.startsWith("---")) {
+            return false;
+        }
+        
+        int endIndex = content.indexOf("---", 3);
+        if (endIndex == -1) {
+            return false;
+        }
+        
+        String frontMatter = content.substring(3, endIndex);
+        for (String line : frontMatter.split("\n")) {
+            line = line.trim();
+            if (line.startsWith("deleted:")) {
+                String value = line.substring(8).trim();
+                return "true".equalsIgnoreCase(value);
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 递归删除本地文件夹
+     */
+    private void deleteLocalFolder(Path folder) throws IOException {
+        if (!Files.exists(folder)) {
+            return;
+        }
+        
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(folder)) {
+            for (Path entry : stream) {
+                if (Files.isDirectory(entry)) {
+                    deleteLocalFolder(entry);
+                } else {
+                    Files.delete(entry);
+                }
+            }
+        }
+        Files.delete(folder);
     }
 
     /**

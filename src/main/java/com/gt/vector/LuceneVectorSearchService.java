@@ -30,6 +30,7 @@ public class LuceneVectorSearchService implements VectorSearchService {
     // 字段名
     private static final String FIELD_ID = "id";
     private static final String FIELD_NOTE_KEY = "noteKey";
+    private static final String FIELD_NOTE_DESC = "noteDesc";
     private static final String FIELD_H1_TITLE = "h1Title";
     private static final String FIELD_CONTENT = "content";
     private static final String FIELD_VECTOR = "vector";
@@ -98,11 +99,12 @@ public class LuceneVectorSearchService implements VectorSearchService {
     
     /**
      * 索引单个 H1 块
-     * @param noteKey 笔记 key
+     * @param noteKey 笔记 key（快捷命令）
+     * @param noteDesc 笔记描述
      * @param h1Title H1 标题
-     * @param content 索引内容（文件名 + H1 + 正文前 300 字）
+     * @param content 索引内容（描述 + H1 + 正文前 300 字）
      */
-    public void indexH1(String noteKey, String h1Title, String content) {
+    public void indexH1(String noteKey, String noteDesc, String h1Title, String content) {
         if (!available) {
             System.err.println("[LuceneVectorSearch] 服务不可用");
             return;
@@ -111,6 +113,9 @@ public class LuceneVectorSearchService implements VectorSearchService {
         lock.writeLock().lock();
         try {
             String docId = buildDocId(noteKey, h1Title);
+            
+            // 调试：打印索引内容
+            System.out.println("[LuceneVectorSearch] 索引内容: noteKey=" + noteKey + ", h1Title=" + h1Title + ", content=" + content);
             
             // 生成向量
             float[] vector = embeddingService.embed(content);
@@ -126,6 +131,7 @@ public class LuceneVectorSearchService implements VectorSearchService {
             Document doc = new Document();
             doc.add(new StringField(FIELD_ID, docId, Field.Store.YES));
             doc.add(new StringField(FIELD_NOTE_KEY, noteKey, Field.Store.YES));
+            doc.add(new StoredField(FIELD_NOTE_DESC, noteDesc != null ? noteDesc : ""));
             doc.add(new StoredField(FIELD_H1_TITLE, h1Title));
             doc.add(new StoredField(FIELD_CONTENT, truncate(content, 200))); // 存储截断后的内容用于显示
             doc.add(new KnnFloatVectorField(FIELD_VECTOR, vector, VectorSimilarityFunction.COSINE));
@@ -170,6 +176,7 @@ public class LuceneVectorSearchService implements VectorSearchService {
                 Document doc = new Document();
                 doc.add(new StringField(FIELD_ID, docId, Field.Store.YES));
                 doc.add(new StringField(FIELD_NOTE_KEY, block.noteKey, Field.Store.YES));
+                doc.add(new StoredField(FIELD_NOTE_DESC, block.noteDesc != null ? block.noteDesc : ""));
                 doc.add(new StoredField(FIELD_H1_TITLE, block.h1Title));
                 doc.add(new StoredField(FIELD_CONTENT, truncate(block.indexContent, 200)));
                 doc.add(new KnnFloatVectorField(FIELD_VECTOR, vector, VectorSimilarityFunction.COSINE));
@@ -222,7 +229,7 @@ public class LuceneVectorSearchService implements VectorSearchService {
      * 语义搜索
      * @param query 查询文本
      * @param topK 返回数量
-     * @return 搜索结果列表（包含 noteKey、h1Title、score）
+     * @return 搜索结果列表（包含 noteKey、h1Title、score、keywordScore、totalScore）
      */
     public List<VectorSearchResult> search(String query, int topK) {
         List<VectorSearchResult> results = new ArrayList<>();
@@ -233,9 +240,14 @@ public class LuceneVectorSearchService implements VectorSearchService {
         
         lock.readLock().lock();
         try {
+            // 调试：打印查询内容和索引数量
+            System.out.println("[LuceneVectorSearch] 搜索查询: " + query);
+            System.out.println("[LuceneVectorSearch] 当前索引数量: " + getIndexedCount());
+            
             // 查询文本转向量
             float[] queryVector = embeddingService.embed(query);
             if (queryVector == null) {
+                System.err.println("[LuceneVectorSearch] 查询向量生成失败");
                 return results;
             }
             
@@ -243,17 +255,36 @@ public class LuceneVectorSearchService implements VectorSearchService {
             KnnFloatVectorQuery knnQuery = new KnnFloatVectorQuery(FIELD_VECTOR, queryVector, topK);
             TopDocs topDocs = searcher.search(knnQuery, topK);
             
+            System.out.println("[LuceneVectorSearch] 搜索结果数: " + topDocs.scoreDocs.length);
+            
             for (ScoreDoc scoreDoc : topDocs.scoreDocs) {
                 Document doc = searcher.storedFields().document(scoreDoc.doc);
                 
                 VectorSearchResult result = new VectorSearchResult();
                 result.noteKey = doc.get(FIELD_NOTE_KEY);
+                result.noteDesc = doc.get(FIELD_NOTE_DESC);
                 result.h1Title = doc.get(FIELD_H1_TITLE);
                 result.content = doc.get(FIELD_CONTENT);
                 result.score = scoreDoc.score;
                 
+                // 计算关键词匹配度（上限 0.2）
+                // 使用 h1Title + noteKey + noteDesc 构建匹配内容，避免旧索引 content 为空的问题
+                String matchContent = buildMatchContent(result.h1Title, result.noteKey, result.noteDesc);
+                result.keywordScore = calculateKeywordScore(query, matchContent);
+                result.totalScore = result.score + result.keywordScore;
+                
+                // 调试：打印每个结果
+                System.out.println("[LuceneVectorSearch] 结果: noteKey=" + result.noteKey + 
+                    ", h1Title=" + result.h1Title + 
+                    ", V=" + String.format("%.2f", result.score) + 
+                    ", K=" + String.format("%.2f", result.keywordScore) + 
+                    ", T=" + String.format("%.2f", result.totalScore));
+                
                 results.add(result);
             }
+            
+            // 按 totalScore 降序排序
+            results.sort((a, b) -> Float.compare(b.totalScore, a.totalScore));
             
         } catch (Exception e) {
             System.err.println("[LuceneVectorSearch] 搜索失败: " + e.getMessage());
@@ -265,12 +296,67 @@ public class LuceneVectorSearchService implements VectorSearchService {
         return results;
     }
     
+    /**
+     * 构建关键词匹配内容
+     * 合并 h1Title、noteKey、noteDesc 用于关键词匹配
+     */
+    private String buildMatchContent(String h1Title, String noteKey, String noteDesc) {
+        StringBuilder sb = new StringBuilder();
+        if (h1Title != null && !h1Title.isEmpty()) {
+            sb.append(h1Title);
+        }
+        if (noteKey != null && !noteKey.isEmpty()) {
+            sb.append(" ").append(noteKey);
+        }
+        if (noteDesc != null && !noteDesc.isEmpty()) {
+            sb.append(" ").append(noteDesc);
+        }
+        return sb.toString();
+    }
+    
+    /**
+     * 计算关键词匹配度
+     * 基于字符重叠率，上限 0.2
+     * @param query 查询文本
+     * @param content 索引内容
+     * @return 关键词匹配分数（0~0.2）
+     */
+    private float calculateKeywordScore(String query, String content) {
+        if (query == null || query.isEmpty() || content == null || content.isEmpty()) {
+            return 0f;
+        }
+        
+        // 转小写以忽略大小写
+        String q = query.toLowerCase();
+        String c = content.toLowerCase();
+        
+        // 计算查询中有多少字符在内容中出现
+        int matchCount = 0;
+        for (int i = 0; i < q.length(); i++) {
+            char ch = q.charAt(i);
+            if (c.indexOf(ch) >= 0) {
+                matchCount++;
+            }
+        }
+        
+        // 匹配率
+        float matchRate = (float) matchCount / q.length();
+        
+        // 额外加分：完全包含查询词
+        if (c.contains(q)) {
+            matchRate = 1.0f;
+        }
+        
+        // 上限 0.2
+        return Math.min(matchRate * 0.2f, 0.2f);
+    }
+    
     // ==================== VectorSearchService 接口实现 ====================
     
     @Override
     public void indexNote(String noteId, String content) {
-        // 兼容旧接口，直接使用 noteId 作为标题
-        indexH1(noteId, "", content);
+        // 兼容旧接口，noteDesc 和 h1Title 都使用空字符串
+        indexH1(noteId, "", "", content);
     }
     
     @Override
@@ -396,14 +482,16 @@ public class LuceneVectorSearchService implements VectorSearchService {
      * H1 块数据
      */
     public static class H1Block {
-        public String noteKey;
-        public String h1Title;
-        public String indexContent;
+        public String noteKey;    // 快捷命令
+        public String noteDesc;   // 描述
+        public String h1Title;    // H1 标题
+        public String indexContent; // 索引内容
         
         public H1Block() {}
         
-        public H1Block(String noteKey, String h1Title, String indexContent) {
+        public H1Block(String noteKey, String noteDesc, String h1Title, String indexContent) {
             this.noteKey = noteKey;
+            this.noteDesc = noteDesc;
             this.h1Title = h1Title;
             this.indexContent = indexContent;
         }
@@ -413,14 +501,18 @@ public class LuceneVectorSearchService implements VectorSearchService {
      * 向量搜索结果
      */
     public static class VectorSearchResult {
-        public String noteKey;
-        public String h1Title;
-        public String content;
-        public float score;
+        public String noteKey;    // 快捷命令
+        public String noteDesc;   // 描述
+        public String h1Title;    // H1 标题
+        public String content;    // 内容预览
+        public float score;       // 向量相似度分数
+        public float keywordScore; // 关键词匹配度（0~0.2）
+        public float totalScore;  // 总相似度 = score + keywordScore
         
         @Override
         public String toString() {
-            return String.format("[%.3f] %s # %s", score, noteKey, h1Title);
+            return String.format("[V:%.2f K:%.2f T:%.2f] %s (%s) # %s", 
+                score, keywordScore, totalScore, noteKey, noteDesc, h1Title);
         }
     }
 }

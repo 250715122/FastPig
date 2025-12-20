@@ -24,7 +24,7 @@ public class VectorSearchManager {
     // 配置
     private static final int MIN_QUERY_LENGTH = 2;
     private static final int DEBOUNCE_MS = 300;
-    private static final int TOP_K = 10;
+    private static final int TOP_K = 20;
     
     private static VectorSearchManager instance;
     
@@ -87,7 +87,11 @@ public class VectorSearchManager {
             
             // 如果索引为空，启动后台全量索引
             if (searchService.getIndexedCount() == 0) {
-                System.out.println("[VectorSearchManager] 索引为空，将启动后台全量索引");
+                System.out.println("[VectorSearchManager] 索引为空，启动后台全量索引...");
+                Path notesDir = Paths.get(System.getProperty("user.dir"), "notes");
+                rebuildAllIndex(notesDir, (current, total) -> {
+                    System.out.println("[VectorSearchManager] 索引进度: " + current + "/" + total);
+                });
             }
         } else {
             System.err.println("[VectorSearchManager] 向量检索服务初始化失败");
@@ -111,18 +115,21 @@ public class VectorSearchManager {
     
     /**
      * 检查是否为向量检索触发模式
+     * 新逻辑：直接输入触发向量检索，:xxx 用于快捷命令打开笔记
      */
     public static boolean isVectorSearchTrigger(String input) {
-        return input != null && (input.startsWith(":") || input.startsWith("："));
+        if (input == null || input.isEmpty()) return false;
+        // 以 : 或 ： 开头的是快捷命令，不触发向量检索
+        if (input.startsWith(":") || input.startsWith("：")) return false;
+        return true;
     }
     
     /**
-     * 从输入中提取查询内容（去掉前缀）
+     * 从输入中提取查询内容
+     * 新逻辑：直接输入即为查询，无需去掉前缀
      */
     public static String extractQuery(String input) {
         if (input == null) return "";
-        if (input.startsWith(":")) return input.substring(1);
-        if (input.startsWith("：")) return input.substring(1);
         return input;
     }
     
@@ -136,9 +143,9 @@ public class VectorSearchManager {
         
         // 如果服务不可用，检查是否因为模型未下载
         if (!isAvailable()) {
-            // 只在输入满足触发条件时才提示
+            // 只在输入满足触发条件时才提示（直接输入即触发）
             if (isVectorSearchTrigger(input)) {
-                String query = extractQuery(input).trim();
+                String query = input.trim();
                 if (query.length() >= MIN_QUERY_LENGTH) {
                     if (!ModelManager.isModelDownloaded()) {
                         // 模型未下载，提示用户下载
@@ -168,13 +175,13 @@ public class VectorSearchManager {
             debounceTask.cancel(false);
         }
         
-        // 检查是否为向量检索触发
+        // 检查是否为向量检索触发（直接输入触发，:xxx 不触发）
         if (!isVectorSearchTrigger(input)) {
             hideResults();
             return;
         }
         
-        String query = extractQuery(input).trim();
+        String query = input.trim();
         
         // 检查最小字符数
         if (query.length() < MIN_QUERY_LENGTH) {
@@ -217,7 +224,12 @@ public class VectorSearchManager {
         SwingUtilities.invokeLater(() -> {
             if (searchPanel != null) {
                 searchPanel.setResults(results, query);
-                searchPanel.showBelow(component);
+                // 使用光标位置定位（如果是 JTextArea）
+                if (component instanceof JTextArea) {
+                    searchPanel.showBelowCaret((JTextArea) component);
+                } else {
+                    searchPanel.showBelow(component);
+                }
                 System.out.println("[VectorSearchManager] 搜索面板已显示");
             }
         });
@@ -301,8 +313,11 @@ public class VectorSearchManager {
     
     /**
      * 索引单个笔记
+     * @param noteKey 快捷命令
+     * @param noteDesc 描述
+     * @param content 笔记内容
      */
-    public void indexNote(String noteKey, String noteName, String content) {
+    public void indexNote(String noteKey, String noteDesc, String content) {
         if (!isAvailable()) {
             return;
         }
@@ -313,12 +328,12 @@ public class VectorSearchManager {
                 // 先移除该笔记的旧索引
                 searchService.removeNoteIndex(noteKey);
                 
-                // 解析 H1 块
-                List<NoteH1Parser.H1Block> blocks = NoteH1Parser.parse(noteKey, noteName, content);
+                // 解析 H1 块（传入描述用于索引内容）
+                List<NoteH1Parser.H1Block> blocks = NoteH1Parser.parse(noteKey, noteDesc, content);
                 
                 // 索引每个 H1 块
                 for (NoteH1Parser.H1Block block : blocks) {
-                    searchService.indexH1(block.noteKey, block.h1Title, block.indexContent);
+                    searchService.indexH1(block.noteKey, block.noteDesc, block.h1Title, block.indexContent);
                 }
                 
                 System.out.println("[VectorSearchManager] 笔记索引完成: " + noteKey + ", " + blocks.size() + " 个 H1");
@@ -379,12 +394,27 @@ public class VectorSearchManager {
                     if (Files.exists(noteFile)) {
                         try {
                             String content = Files.readString(noteFile);
-                            String noteName = noteKey; // 可以从其他地方获取更友好的名称
+                            
+                            // 检查是否已删除，跳过已删除的笔记
+                            if (isNoteDeleted(content)) {
+                                current++;
+                                if (progressCallback != null) {
+                                    final int c = current;
+                                    SwingUtilities.invokeLater(() -> progressCallback.accept(c, total));
+                                }
+                                continue;
+                            }
+                            
+                            // 从 YAML Front Matter 中提取描述
+                            String noteDesc = extractDescFromFrontMatter(content);
+                            if (noteDesc == null || noteDesc.isEmpty()) {
+                                noteDesc = noteKey; // 如果没有描述，使用 key 作为描述
+                            }
                             
                             // 解析并索引
-                            List<NoteH1Parser.H1Block> blocks = NoteH1Parser.parse(noteKey, noteName, content);
+                            List<NoteH1Parser.H1Block> blocks = NoteH1Parser.parse(noteKey, noteDesc, content);
                             for (NoteH1Parser.H1Block block : blocks) {
-                                searchService.indexH1(block.noteKey, block.h1Title, block.indexContent);
+                                searchService.indexH1(block.noteKey, block.noteDesc, block.h1Title, block.indexContent);
                             }
                             
                         } catch (IOException e) {
@@ -418,6 +448,69 @@ public class VectorSearchManager {
         if (searchService != null) {
             searchService.close();
         }
+    }
+    
+    /**
+     * 从 YAML Front Matter 中提取描述
+     * @param content 笔记内容
+     * @return 描述，未找到返回 null
+     */
+    private String extractDescFromFrontMatter(String content) {
+        if (content == null || !content.startsWith("---")) {
+            return null;
+        }
+        
+        int endIndex = content.indexOf("---", 3);
+        if (endIndex == -1) {
+            return null;
+        }
+        
+        String frontMatter = content.substring(3, endIndex);
+        
+        // 简单解析 desc 字段
+        for (String line : frontMatter.split("\n")) {
+            line = line.trim();
+            if (line.startsWith("desc:")) {
+                String desc = line.substring(5).trim();
+                // 去掉可能的引号
+                if (desc.startsWith("\"") && desc.endsWith("\"")) {
+                    desc = desc.substring(1, desc.length() - 1);
+                } else if (desc.startsWith("'") && desc.endsWith("'")) {
+                    desc = desc.substring(1, desc.length() - 1);
+                }
+                return desc;
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * 检查笔记是否被标记为已删除
+     * @param content 笔记内容
+     * @return 是否已删除
+     */
+    private boolean isNoteDeleted(String content) {
+        if (content == null || !content.startsWith("---")) {
+            return false;
+        }
+        
+        int endIndex = content.indexOf("---", 3);
+        if (endIndex == -1) {
+            return false;
+        }
+        
+        String frontMatter = content.substring(3, endIndex);
+        
+        for (String line : frontMatter.split("\n")) {
+            line = line.trim();
+            if (line.startsWith("deleted:")) {
+                String value = line.substring(8).trim();
+                return "true".equalsIgnoreCase(value);
+            }
+        }
+        
+        return false;
     }
 }
 
