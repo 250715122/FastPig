@@ -14,6 +14,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.concurrent.*;
+import java.util.function.Consumer;
 
 /**
  * 数据同步服务
@@ -72,16 +73,24 @@ public class DbSyncService {
     }
 
     /**
+     * 启动时同步策略（无状态回调）
+     */
+    public boolean syncFromCloudOnStart() {
+        return syncFromCloudOnStart(null);
+    }
+
+    /**
      * 启动时同步策略：
      * - 文件同步模式：智能决定上传/下载
      * - 整库模式：从云端拉取最新数据库
+     * @param statusCallback 状态回调，用于更新 UI 状态栏
      */
-    public boolean syncFromCloudOnStart() {
+    public boolean syncFromCloudOnStart(Consumer<String> statusCallback) {
         logger.debug(">>> [DbSyncService] syncFromCloudOnStart() 被调用");
         
         if (useFileSync) {
             // 文件同步模式
-            fileSync.syncOnStart();
+            fileSync.syncOnStart(statusCallback);
             return true;
         }
         

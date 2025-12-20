@@ -1,5 +1,6 @@
 package com.gt.vector;
 
+import com.gt.UnifiedNoteAppFrame;
 import com.gt.VectorSearchPanel;
 import com.gt.storage.NoteFileStorage;
 
@@ -70,6 +71,7 @@ public class VectorSearchManager {
         }
         
         // 初始化服务
+        UnifiedNoteAppFrame.updateStartupStatus("正在加载向量模型...");
         System.out.println("[VectorSearchManager] 模型已存在，开始初始化 EmbeddingService...");
         EmbeddingService.getInstance().initialize();
         searchService = VectorSearchFactory.getLuceneService();
@@ -91,7 +93,11 @@ public class VectorSearchManager {
                 Path notesDir = Paths.get(System.getProperty("user.dir"), "notes");
                 rebuildAllIndex(notesDir, (current, total) -> {
                     System.out.println("[VectorSearchManager] 索引进度: " + current + "/" + total);
+                    UnifiedNoteAppFrame.updateStartupStatus("正在创建向量索引 " + current + "/" + total + "...");
                 });
+                UnifiedNoteAppFrame.updateStartupStatus("就绪");
+            } else {
+                UnifiedNoteAppFrame.updateStartupStatus("就绪");
             }
         } else {
             System.err.println("[VectorSearchManager] 向量检索服务初始化失败");
@@ -99,6 +105,7 @@ public class VectorSearchManager {
                 System.err.println("[VectorSearchManager] searchService.isAvailable() = " + searchService.isAvailable());
                 System.err.println("[VectorSearchManager] errorMessage = " + searchService.getErrorMessage());
             }
+            UnifiedNoteAppFrame.updateStartupStatus("向量服务初始化失败");
         }
     }
     

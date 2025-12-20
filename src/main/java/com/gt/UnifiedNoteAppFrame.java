@@ -53,6 +53,9 @@ public class UnifiedNoteAppFrame extends JFrame {
     
     private static final Logger logger = LogManager.getLogger(UnifiedNoteAppFrame.class);
     
+    // 静态实例引用，供启动进度更新使用
+    private static UnifiedNoteAppFrame instance;
+    
     /**
      * 行号显示组件
      * 显示在编辑区左侧，不属于编辑内容，复制时不会被复制
@@ -253,6 +256,7 @@ public class UnifiedNoteAppFrame extends JFrame {
 
     public UnifiedNoteAppFrame(NoteRepository repository) {
         super("迅猪");
+        instance = this; // 设置静态实例引用
         this.repository = repository;
         this.noteService = com.gt.service.NoteService.getInstance(repository);
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
@@ -2614,6 +2618,15 @@ public class UnifiedNoteAppFrame extends JFrame {
      */
     public void updateStatusLeft(String text) {
         SwingUtilities.invokeLater(() -> statusLeft.setText(text));
+    }
+    
+    /**
+     * 静态方法：更新启动进度状态（供启动流程中其他类调用）
+     */
+    public static void updateStartupStatus(String text) {
+        if (instance != null) {
+            instance.updateStatusLeft(text);
+        }
     }
     
     /**

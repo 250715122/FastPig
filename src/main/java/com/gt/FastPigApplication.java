@@ -78,9 +78,12 @@ public class FastPigApplication extends JFrame {
         logger.info("开始后台同步...");
         new Thread(() -> {
             try {
-                DbSyncService.getInstance().syncFromCloudOnStart();
+                DbSyncService.getInstance().syncFromCloudOnStart(
+                    status -> UnifiedNoteAppFrame.updateStartupStatus(status)
+                );
             } catch (Exception e) {
                 logger.error("[FastPigApplication] 后台同步失败: {}", e.getMessage(), e);
+                UnifiedNoteAppFrame.updateStartupStatus("同步失败");
             }
         }, "CloudSync-Thread").start();
         // 同时初始化热键（Alt+S 可再次呼出界面）

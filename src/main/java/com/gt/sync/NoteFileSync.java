@@ -15,6 +15,7 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -311,16 +312,25 @@ public class NoteFileSync {
     }
 
     /**
+     * 从云端下载同步（无状态回调）
+     */
+    public boolean syncFromCloud() {
+        return syncFromCloud(null);
+    }
+
+    /**
      * 从云端下载同步
      * 优先使用云端 .sync_meta.json 进行版本号快速比较
      * 使用 5 线程并发下载，每个任务间隔 0.3 秒
+     * @param statusCallback 状态回调，用于更新 UI 状态栏
      */
-    public boolean syncFromCloud() {
+    public boolean syncFromCloud(Consumer<String> statusCallback) {
         if (!cloudProvider.isEnabled()) {
             logger.info("[NoteFileSync] 云存储未启用，跳过下载");
             return false;
         }
 
+        updateStatus(statusCallback, "正在检查云端文件...");
         logger.info("[NoteFileSync] 开始从云端下载同步...");
         long startTime = System.currentTimeMillis();
 
@@ -371,6 +381,7 @@ public class NoteFileSync {
                     // 传统模式：逐个检查（慢）
                     if (checkCount % 10 == 0 || checkCount == totalFolders) {
                         logger.info("[NoteFileSync] 检查进度: " + checkCount + "/" + totalFolders);
+                        updateStatus(statusCallback, "正在检查云端文件 " + checkCount + "/" + totalFolders + "...");
                     }
                     needDownload = shouldDownload(cloudFolder, localFolder, localMeta);
                 }
@@ -390,6 +401,8 @@ public class NoteFileSync {
             AtomicInteger progressCount = new AtomicInteger(0);
 
             if (totalToDownload > 0) {
+                updateStatus(statusCallback, "正在下载 0/" + totalToDownload + " 个文件...");
+                
                 // 使用 5 线程的线程池
                 int threadCount = Math.min(5, totalToDownload);
                 ExecutorService executor = Executors.newFixedThreadPool(threadCount);
@@ -400,13 +413,18 @@ public class NoteFileSync {
 
                 logger.info("[NoteFileSync] 启动 " + threadCount + " 线程并发下载...");
 
+                // 用于状态回调的 final 引用
+                final Consumer<String> callback = statusCallback;
+                final int total = totalToDownload;
+
                 // 提交所有任务到线程池，每提交一个间隔 0.3 秒
                 for (int i = 0; i < toDownload.size(); i++) {
                     final DownloadTask task = toDownload.get(i);
 
                     futures.add(executor.submit(() -> {
                         int current = progressCount.incrementAndGet();
-                        logger.info("[NoteFileSync] 下载进度: " + current + "/" + totalToDownload + " - " + task.folderName);
+                        logger.info("[NoteFileSync] 下载进度: " + current + "/" + total + " - " + task.folderName);
+                        updateStatus(callback, "正在下载 " + current + "/" + total + " 个文件...");
                         
                         boolean success = downloadNoteFolder(task.folderName, task.localFolder);
                         if (success) {
@@ -440,6 +458,7 @@ public class NoteFileSync {
 
             // 重建索引
             if (downloadedCount.get() > 0 && noteService != null) {
+                updateStatus(statusCallback, "正在重建索引...");
                 logger.info("[NoteFileSync] 重建索引...");
                 noteService.rebuildIndexFromFiles();
             }
@@ -456,12 +475,23 @@ public class NoteFileSync {
             long elapsed = System.currentTimeMillis() - startTime;
             logger.info("[NoteFileSync] 下载同步完成: 成功 " + downloadedCount.get() + " 个, 失败 " + failedCount.get() + " 个, 跳过 " + skippedCount.get() + " 个, 耗时 " + elapsed + "ms");
 
+            updateStatus(statusCallback, "云同步完成");
             return true;
 
         } catch (Exception e) {
             logger.error("[NoteFileSync] 下载同步失败: " + e.getMessage());
             e.printStackTrace();
+            updateStatus(statusCallback, "云同步失败");
             return false;
+        }
+    }
+    
+    /**
+     * 更新状态回调（线程安全）
+     */
+    private void updateStatus(Consumer<String> callback, String status) {
+        if (callback != null) {
+            callback.accept(status);
         }
     }
 
@@ -481,14 +511,24 @@ public class NoteFileSync {
     }
 
     /**
-     * 启动时同步（智能决定上传还是下载）
-     * 注意：首次启动时不自动上传大量文件，避免触发云端限流
+     * 启动时同步（无状态回调）
      */
     public void syncOnStart() {
+        syncOnStart(null);
+    }
+
+    /**
+     * 启动时同步（智能决定上传还是下载）
+     * 注意：首次启动时不自动上传大量文件，避免触发云端限流
+     * @param statusCallback 状态回调，用于更新 UI 状态栏
+     */
+    public void syncOnStart(Consumer<String> statusCallback) {
         if (!cloudProvider.isEnabled()) {
+            updateStatus(statusCallback, "云存储未启用");
             return;
         }
 
+        updateStatus(statusCallback, "正在检查云端...");
         logger.info("[NoteFileSync] 启动时同步检查...");
 
         try {
@@ -511,17 +551,21 @@ public class NoteFileSync {
 
             if (cloudCount > 0) {
                 // 云端有数据，下载同步
-                syncFromCloud();
+                syncFromCloud(statusCallback);
             } else if (localCount > 0 && cloudCount == 0) {
                 // 本地有数据但云端为空（首次迁移场景）
                 // 不自动上传，提示用户手动同步
                 logger.info("[NoteFileSync] ⚠️ 检测到首次迁移场景（本地 " + localCount + " 个，云端 0 个）");
                 logger.info("[NoteFileSync] ⚠️ 为避免触发云端限流，请手动按 Alt+S 上传");
                 logger.info("[NoteFileSync] ⚠️ 上传过程中请耐心等待，每个文件间隔 200ms");
+                updateStatus(statusCallback, "就绪（云端为空，按Alt+S上传）");
+            } else {
+                updateStatus(statusCallback, "就绪");
             }
 
         } catch (Exception e) {
             logger.error("[NoteFileSync] 启动同步失败: " + e.getMessage());
+            updateStatus(statusCallback, "同步失败");
         }
     }
 
