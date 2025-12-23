@@ -1,5 +1,6 @@
 package com.gt;
 
+import org.apache.logging.log4j.LogManager;
 import org.jnativehook.GlobalScreen;
 import org.jnativehook.NativeHookException;
 import org.jnativehook.keyboard.NativeKeyEvent;
@@ -17,6 +18,8 @@ import java.util.logging.Logger;
  * 混合热键管理器 - 支持多种热键实现方案
  */
 public class HotKeyManager {
+    
+    private static final org.apache.logging.log4j.Logger logger = LogManager.getLogger(HotKeyManager.class);
     
     public enum HotKeyMethod {
         JINTELLITYPE,    // 传统的JIntellitype
@@ -46,30 +49,27 @@ public class HotKeyManager {
      * 初始化热键管理器，自动选择最佳方案
      */
     public void initialize() {
-        System.out.println("正在初始化全局热键管理器...");
+        logger.info("正在初始化全局热键管理器...");
         SystemUtils.printSystemDiagnostics();
         
         // 首先尝试JNativeHook（推荐）
         if (tryJNativeHook()) {
             activeMethod = HotKeyMethod.JNATIVEHOOK;
-            System.out.println("✓ 使用JNativeHook实现全局热键");
+            logger.info("使用JNativeHook实现全局热键");
             return;
         }
         
         // 备选方案：JIntellitype
         if (tryJIntellitype()) {
             activeMethod = HotKeyMethod.JINTELLITYPE;
-            System.out.println("✓ 使用JIntellitype实现全局热键");
+            logger.info("使用JIntellitype实现全局热键");
             return;
         }
         
         // 无热键支持
         activeMethod = HotKeyMethod.NONE;
-        System.out.println("⚠ 全局热键功能不可用");
-        System.out.println("建议：");
-        System.out.println("1. 以管理员权限运行程序");
-        System.out.println("2. 检查杀毒软件设置");
-        System.out.println("3. 使用窗口菜单或系统托盘作为替代");
+        logger.warn("全局热键功能不可用");
+        logger.warn("建议：1. 以管理员权限运行程序 2. 检查杀毒软件设置 3. 使用窗口菜单或系统托盘作为替代");
     }
     
     /**
@@ -77,12 +77,12 @@ public class HotKeyManager {
      */
     private boolean tryJNativeHook() {
         try {
-            System.out.println("尝试初始化JNativeHook...");
+            logger.debug("尝试初始化JNativeHook...");
             
             // 禁用JNativeHook的日志输出（减少控制台噪音）
-            Logger logger = Logger.getLogger(GlobalScreen.class.getPackage().getName());
-            logger.setLevel(Level.WARNING);
-            logger.setUseParentHandlers(false);
+            Logger jnhLogger = Logger.getLogger(GlobalScreen.class.getPackage().getName());
+            jnhLogger.setLevel(Level.WARNING);
+            jnhLogger.setUseParentHandlers(false);
             
             // 注册native hook
             GlobalScreen.registerNativeHook();
@@ -105,15 +105,15 @@ public class HotKeyManager {
                 }
             });
             
-            System.out.println("JNativeHook初始化成功！");
+            logger.info("JNativeHook初始化成功");
             printJNativeHookHotkeys();
             return true;
             
         } catch (NativeHookException e) {
-            System.err.println("JNativeHook初始化失败: " + e.getMessage());
+            logger.warn("JNativeHook初始化失败: {}", e.getMessage());
             return false;
         } catch (Exception e) {
-            System.err.println("JNativeHook初始化异常: " + e.getMessage());
+            logger.warn("JNativeHook初始化异常: {}", e.getMessage());
             return false;
         }
     }
@@ -123,7 +123,7 @@ public class HotKeyManager {
      */
     private boolean tryJIntellitype() {
         try {
-            System.out.println("尝试初始化JIntellitype...");
+            logger.debug("尝试初始化JIntellitype...");
             
             // 注册热键（Alt 系列）
             JIntellitype.getInstance().registerHotKey(HOTKEY_SHOW_NORMAL, JIntellitype.MOD_ALT, (int)'N');
@@ -142,12 +142,12 @@ public class HotKeyManager {
                 }
             });
             
-            System.out.println("JIntellitype初始化成功！");
+            logger.info("JIntellitype初始化成功");
             printJIntellitypeHotkeys();
             return true;
             
         } catch (Exception e) {
-            System.err.println("JIntellitype初始化失败: " + e.getMessage());
+            logger.warn("JIntellitype初始化失败: {}", e.getMessage());
             return false;
         }
     }
@@ -161,42 +161,36 @@ public class HotKeyManager {
         boolean ctrlPressed = (e.getModifiers() & NativeKeyEvent.CTRL_MASK) != 0;
         
         if (altPressed) {
-            System.out.println("检测到Alt组合键: Alt + " + NativeKeyEvent.getKeyText(e.getKeyCode()));
+            logger.debug("检测到Alt组合键: Alt + {}", NativeKeyEvent.getKeyText(e.getKeyCode()));
             
             switch (e.getKeyCode()) {
                 case NativeKeyEvent.VC_N:
-                    System.out.println("执行Alt+N: 恢复窗口");
+                    logger.debug("执行Alt+N: 恢复窗口");
                     showWindowNormal();
                     break;
                 case NativeKeyEvent.VC_M:
-                    System.out.println("执行Alt+M: 最大化窗口");
+                    logger.debug("执行Alt+M: 最大化窗口");
                     showWindowMaximized();
                     break;
                 case NativeKeyEvent.VC_L:
-                    System.out.println("执行Alt+L: 最小化窗口");
+                    logger.debug("执行Alt+L: 最小化窗口");
                     minimizeWindow();
                     break;
                 case NativeKeyEvent.VC_Q:
-                    System.out.println("执行Alt+Q: 退出程序");
+                    logger.debug("执行Alt+Q: 退出程序");
                     exitApplication();
                     break;
                 case NativeKeyEvent.VC_S:
-                    System.out.println("========================================");
-                    System.out.println("[热键捕获] 检测到 Alt+S 按键");
-                    System.out.println("[热键捕获] 时间: " + new java.util.Date());
-                    System.out.println("========================================");
+                    logger.info("检测到 Alt+S 按键，开始上传");
                     syncToCloud();
                     break;
                 case NativeKeyEvent.VC_U:
-                    System.out.println("========================================");
-                    System.out.println("[热键捕获] 检测到 Alt+U 按键");
-                    System.out.println("[热键捕获] 时间: " + new java.util.Date());
-                    System.out.println("========================================");
+                    logger.info("检测到 Alt+U 按键，开始下载");
                     pullFromCloud();
                     break;
                 // Alt+P 不作为全局热键处理（预览仅在应用内快捷键生效）
                 default:
-                    System.out.println("未处理的Alt组合键: " + NativeKeyEvent.getKeyText(e.getKeyCode()));
+                    logger.debug("未处理的Alt组合键: {}", NativeKeyEvent.getKeyText(e.getKeyCode()));
                     break;
             }
         }
@@ -234,89 +228,68 @@ public class HotKeyManager {
      * 同步数据库到云端（上传）
      */
     private void syncToCloud() {
-        System.out.println(">>> [Alt+S 上传流程] 开始执行");
+        logger.info("[上传] 开始执行");
         
         // 获取当前活动的编辑器窗口
         UnifiedNoteAppFrame activeFrame = UnifiedNoteAppFrame.getActiveInstance();
-        System.out.println(">>> [Alt+S 上传流程] 活动窗口: " + (activeFrame != null ? "已找到" : "未找到"));
+        logger.debug("[上传] 活动窗口: {}", (activeFrame != null ? "已找到" : "未找到"));
         
         try {
-            System.out.println(">>> [Alt+S 上传流程] 准备调用 DbSyncService.syncToCloud()");
-            
             // 更新状态栏
             if (activeFrame != null) {
-                System.out.println(">>> [Alt+S 上传流程] 更新状态栏: 正在上传到云端…");
                 activeFrame.updateStatusLeft("正在上传到云端…");
             }
             
             // 执行同步
             long startTime = System.currentTimeMillis();
-            System.out.println(">>> [Alt+S 上传流程] 开始时间: " + new java.util.Date(startTime));
-            
             boolean ok = DbSyncService.getInstance().syncToCloud();
+            long elapsed = System.currentTimeMillis() - startTime;
             
-            long endTime = System.currentTimeMillis();
-            System.out.println(">>> [Alt+S 上传流程] 结束时间: " + new java.util.Date(endTime));
-            System.out.println(">>> [Alt+S 上传流程] 耗时: " + (endTime - startTime) + "ms");
-            System.out.println(">>> [Alt+S 上传流程] 返回结果: " + (ok ? "成功" : "失败"));
+            logger.info("[上传] 耗时: {}ms, 结果: {}", elapsed, (ok ? "成功" : "失败"));
             
             // 更新结果
             if (ok) {
-                System.out.println(">>> [Alt+S 上传流程] ✅ 上传成功！");
                 if (activeFrame != null) {
                     activeFrame.updateStatusLeft("上传云端成功");
                 }
             } else {
-                System.out.println(">>> [Alt+S 上传流程] ❌ 上传失败！");
                 if (activeFrame != null) {
                     activeFrame.updateStatusLeft("上传云端失败");
                 }
             }
         } catch (Exception ex) {
-            System.err.println(">>> [Alt+S 上传流程] ❌ 异常: " + ex.getMessage());
-            ex.printStackTrace();
+            logger.error("[上传] 异常: {}", ex.getMessage(), ex);
             if (activeFrame != null) {
                 activeFrame.updateStatusLeft("上传云端失败: " + ex.getMessage());
             }
         }
-        
-        System.out.println(">>> [Alt+S 上传流程] 流程结束");
-        System.out.println("========================================");
     }
 
     /**
      * 从云端下载数据库（下载）
      */
     private void pullFromCloud() {
-        System.out.println(">>> [Alt+U 下载流程] 开始执行");
+        logger.info("[下载] 开始执行");
         
         // 获取当前活动的编辑器窗口
         UnifiedNoteAppFrame activeFrame = UnifiedNoteAppFrame.getActiveInstance();
-        System.out.println(">>> [Alt+U 下载流程] 活动窗口: " + (activeFrame != null ? "已找到" : "未找到"));
+        logger.debug("[下载] 活动窗口: {}", (activeFrame != null ? "已找到" : "未找到"));
         
         try {
-            System.out.println(">>> [Alt+U 下载流程] 准备调用 DbSyncService.syncFromCloud()");
-            
             // 更新状态栏
             if (activeFrame != null) {
-                System.out.println(">>> [Alt+U 下载流程] 更新状态栏: 正在从云端下载…");
                 activeFrame.updateStatusLeft("正在从云端下载…");
             }
             
             // 执行下载
             long startTime = System.currentTimeMillis();
-            System.out.println(">>> [Alt+U 下载流程] 开始时间: " + new java.util.Date(startTime));
-            
             boolean ok = DbSyncService.getInstance().syncFromCloud();
+            long elapsed = System.currentTimeMillis() - startTime;
             
-            long endTime = System.currentTimeMillis();
-            System.out.println(">>> [Alt+U 下载流程] 结束时间: " + new java.util.Date(endTime));
-            System.out.println(">>> [Alt+U 下载流程] 耗时: " + (endTime - startTime) + "ms");
-            System.out.println(">>> [Alt+U 下载流程] 返回结果: " + (ok ? "成功" : "失败"));
+            logger.info("[下载] 耗时: {}ms, 结果: {}", elapsed, (ok ? "成功" : "失败"));
             
             // 更新结果
             if (ok) {
-                System.out.println(">>> [Alt+U 下载流程] ✅ 下载成功！");
                 if (activeFrame != null) {
                     activeFrame.updateStatusLeft("云端下载成功");
                     // 提示：需要重启应用才能看到云端数据
@@ -328,21 +301,16 @@ public class HotKeyManager {
                     );
                 }
             } else {
-                System.out.println(">>> [Alt+U 下载流程] ❌ 下载失败！");
                 if (activeFrame != null) {
                     activeFrame.updateStatusLeft("云端下载失败");
                 }
             }
         } catch (Exception ex) {
-            System.err.println(">>> [Alt+U 下载流程] ❌ 异常: " + ex.getMessage());
-            ex.printStackTrace();
+            logger.error("[下载] 异常: {}", ex.getMessage(), ex);
             if (activeFrame != null) {
                 activeFrame.updateStatusLeft("云端下载失败: " + ex.getMessage());
             }
         }
-        
-        System.out.println(">>> [Alt+U 下载流程] 流程结束");
-        System.out.println("========================================");
     }
 
     // 预览切换的全局热键逻辑已移除，避免与应用内快捷键冲突
@@ -361,7 +329,7 @@ public class HotKeyManager {
             active.setAlwaysOnTop(true);
             active.setAlwaysOnTop(false);
             active.focusEditor();
-            System.out.println("窗口已恢复正常大小");
+            logger.debug("窗口已恢复正常大小");
             return;
         }
         // 退化处理：使用旧的 targetFrame
@@ -375,7 +343,7 @@ public class HotKeyManager {
             if (targetTextArea != null) {
                 javax.swing.SwingUtilities.invokeLater(() -> targetTextArea.requestFocusInWindow());
             }
-            System.out.println("窗口已恢复正常大小");
+            logger.debug("窗口已恢复正常大小");
         }
     }
     
@@ -392,7 +360,7 @@ public class HotKeyManager {
             active.setAlwaysOnTop(true);
             active.setAlwaysOnTop(false);
             active.focusEditor();
-            System.out.println("窗口已最大化显示");
+            logger.debug("窗口已最大化显示");
             return;
         }
         if (targetFrame != null) {
@@ -405,7 +373,7 @@ public class HotKeyManager {
             if (targetTextArea != null) {
                 javax.swing.SwingUtilities.invokeLater(() -> targetTextArea.requestFocusInWindow());
             }
-            System.out.println("窗口已最大化显示");
+            logger.debug("窗口已最大化显示");
         }
     }
     
@@ -416,12 +384,12 @@ public class HotKeyManager {
         UnifiedNoteAppFrame active = UnifiedNoteAppFrame.getActiveInstance();
         if (active != null) {
             active.setExtendedState(JFrame.ICONIFIED);
-            System.out.println("窗口已最小化");
+            logger.debug("窗口已最小化");
             return;
         }
         if (targetFrame != null) {
             targetFrame.setExtendedState(JFrame.ICONIFIED);
-            System.out.println("窗口已最小化");
+            logger.debug("窗口已最小化");
         }
     }
     
@@ -429,12 +397,12 @@ public class HotKeyManager {
      * 退出应用程序（带超时同步）
      */
     private void exitApplication() {
-        System.out.println("[退出] 正在同步数据库到云端（最多等待5秒）...");
+        logger.info("[退出] 正在同步数据库到云端（最多等待5秒）...");
         boolean synced = DbSyncService.getInstance().syncToCloudWithTimeout(5);
         if (synced) {
-            System.out.println("[退出] 同步完成，退出程序");
+            logger.info("[退出] 同步完成，退出程序");
         } else {
-            System.out.println("[退出] 同步跳过或超时，直接退出程序");
+            logger.info("[退出] 同步跳过或超时，直接退出程序");
         }
         cleanup();
         System.exit(0);
@@ -451,7 +419,7 @@ public class HotKeyManager {
                 JIntellitype.getInstance().cleanUp();
             }
         } catch (Exception e) {
-            System.err.println("清理热键资源时出错: " + e.getMessage());
+            logger.error("清理热键资源时出错: {}", e.getMessage(), e);
         }
     }
     
@@ -466,29 +434,17 @@ public class HotKeyManager {
      * 打印JNativeHook热键说明
      */
     private void printJNativeHookHotkeys() {
-        System.out.println("=== JNativeHook全局热键 ===");
-        System.out.println("Alt + N: 显示/恢复窗口");
-        System.out.println("Alt + M: 最大化窗口");
-        System.out.println("Alt + L: 最小化窗口");
-        System.out.println("Alt + Q: 退出程序");
-        System.out.println("Alt + S: 上传数据库到云端");
-        System.out.println("Alt + U: 从云端下载数据库");
-        // 撤回 Ctrl 系列说明
-        System.out.println("========================");
+        logger.info("=== JNativeHook全局热键 ===");
+        logger.info("Alt+N: 显示/恢复, Alt+M: 最大化, Alt+L: 最小化, Alt+Q: 退出");
+        logger.info("Alt+S: 上传云端, Alt+U: 从云端下载");
     }
     
     /**
      * 打印JIntellitype热键说明
      */
     private void printJIntellitypeHotkeys() {
-        System.out.println("=== JIntellitype全局热键 ===");
-        System.out.println("Alt + N: 显示/恢复窗口");
-        System.out.println("Alt + M: 最大化窗口");
-        System.out.println("Alt + L: 最小化窗口");
-        System.out.println("Alt + Q: 退出程序");
-        System.out.println("Alt + S: 上传数据库到云端");
-        System.out.println("Alt + U: 从云端下载数据库");
-        // 撤回 Ctrl 系列说明
-        System.out.println("=========================");
+        logger.info("=== JIntellitype全局热键 ===");
+        logger.info("Alt+N: 显示/恢复, Alt+M: 最大化, Alt+L: 最小化, Alt+Q: 退出");
+        logger.info("Alt+S: 上传云端, Alt+U: 从云端下载");
     }
 }

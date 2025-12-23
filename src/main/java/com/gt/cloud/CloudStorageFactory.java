@@ -1,5 +1,8 @@
 package com.gt.cloud;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -15,6 +18,8 @@ import java.util.Properties;
  * cloud.provider=nutstore | aliyun | tencent | local
  */
 public class CloudStorageFactory {
+    
+    private static final Logger logger = LogManager.getLogger(CloudStorageFactory.class);
 
     private static CloudStorageProvider instance;
 
@@ -43,7 +48,7 @@ public class CloudStorageFactory {
         Properties config = loadConfig();
         String providerName = config.getProperty("cloud.provider", "nutstore").toLowerCase().trim();
 
-        System.out.println("[CloudStorageFactory] 云存储提供者: " + providerName);
+        logger.info("云存储提供者: {}", providerName);
 
         switch (providerName) {
             case "nutstore":
@@ -51,17 +56,17 @@ public class CloudStorageFactory {
 
             case "aliyun":
                 // TODO: 实现阿里云 OSS 提供者
-                System.out.println("[CloudStorageFactory] 阿里云 OSS 暂未实现，回退到坚果云");
+                logger.warn("阿里云 OSS 暂未实现，回退到坚果云");
                 return NutstoreCloudProvider.getInstance();
 
             case "tencent":
                 // TODO: 实现腾讯云 COS 提供者
-                System.out.println("[CloudStorageFactory] 腾讯云 COS 暂未实现，回退到坚果云");
+                logger.warn("腾讯云 COS 暂未实现，回退到坚果云");
                 return NutstoreCloudProvider.getInstance();
 
             case "local":
                 // TODO: 实现本地备份提供者
-                System.out.println("[CloudStorageFactory] 本地备份暂未实现，回退到坚果云");
+                logger.warn("本地备份暂未实现，回退到坚果云");
                 return NutstoreCloudProvider.getInstance();
 
             case "none":
@@ -69,7 +74,7 @@ public class CloudStorageFactory {
                 return new DisabledCloudProvider();
 
             default:
-                System.out.println("[CloudStorageFactory] 未知提供者: " + providerName + "，使用坚果云");
+                logger.warn("未知提供者: {}，使用坚果云", providerName);
                 return NutstoreCloudProvider.getInstance();
         }
     }
@@ -87,7 +92,7 @@ public class CloudStorageFactory {
                 props.load(input);
                 return props;
             } catch (Exception e) {
-                System.err.println("[CloudStorageFactory] 读取配置文件失败: " + e.getMessage());
+                logger.error("读取配置文件失败: {}", e.getMessage());
             }
         }
 
@@ -97,7 +102,7 @@ public class CloudStorageFactory {
                 props.load(input);
             }
         } catch (Exception e) {
-            System.err.println("[CloudStorageFactory] 读取配置文件失败: " + e.getMessage());
+            logger.error("读取配置文件失败: {}", e.getMessage());
         }
 
         return props;

@@ -1,5 +1,7 @@
 package com.gt.vector;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.lucene.document.*;
 import org.apache.lucene.index.*;
 import org.apache.lucene.search.*;
@@ -21,6 +23,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * - vector: 512 维向量（KNN 检索用）
  */
 public class LuceneVectorSearchService implements VectorSearchService {
+    
+    private static final Logger logger = LogManager.getLogger(LuceneVectorSearchService.class);
     
     private static final String INDEX_DIR = "vector_index";
     private static final int VECTOR_DIM = 512;
@@ -65,7 +69,7 @@ public class LuceneVectorSearchService implements VectorSearchService {
             
             if (!embeddingService.isAvailable()) {
                 errorMessage = "Embedding 服务不可用: " + embeddingService.getErrorMessage();
-                System.err.println("[LuceneVectorSearch] " + errorMessage);
+                logger.error(errorMessage);
                 return;
             }
             
@@ -87,13 +91,12 @@ public class LuceneVectorSearchService implements VectorSearchService {
             refreshReader();
             
             available = true;
-            System.out.println("[LuceneVectorSearch] 索引初始化完成，索引目录: " + indexPath);
-            System.out.println("[LuceneVectorSearch] 当前索引数量: " + getIndexedCount());
+            logger.info("索引初始化完成，索引目录: {}", indexPath);
+            logger.info("当前索引数量: {}", getIndexedCount());
             
         } catch (Exception e) {
             errorMessage = "索引初始化失败: " + e.getMessage();
-            System.err.println("[LuceneVectorSearch] " + errorMessage);
-            e.printStackTrace();
+            logger.error(errorMessage, e);
         }
     }
     
@@ -106,7 +109,7 @@ public class LuceneVectorSearchService implements VectorSearchService {
      */
     public void indexH1(String noteKey, String noteDesc, String h1Title, String content) {
         if (!available) {
-            System.err.println("[LuceneVectorSearch] 服务不可用");
+            logger.error("服务不可用");
             return;
         }
         
@@ -115,12 +118,12 @@ public class LuceneVectorSearchService implements VectorSearchService {
             String docId = buildDocId(noteKey, h1Title);
             
             // 调试：打印索引内容
-            System.out.println("[LuceneVectorSearch] 索引内容: noteKey=" + noteKey + ", h1Title=" + h1Title + ", content=" + content);
+            logger.debug("索引内容: noteKey={}, h1Title={}, content={}", noteKey, h1Title, content);
             
             // 生成向量
             float[] vector = embeddingService.embed(content);
             if (vector == null) {
-                System.err.println("[LuceneVectorSearch] 向量生成失败: " + docId);
+                logger.error("向量生成失败: {}", docId);
                 return;
             }
             
@@ -142,11 +145,10 @@ public class LuceneVectorSearchService implements VectorSearchService {
             // 刷新 reader
             refreshReader();
             
-            System.out.println("[LuceneVectorSearch] 索引添加: " + docId);
+            logger.debug("索引添加: {}", docId);
             
         } catch (Exception e) {
-            System.err.println("[LuceneVectorSearch] 索引失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("索引失败: {}", e.getMessage(), e);
         } finally {
             lock.writeLock().unlock();
         }
@@ -187,18 +189,17 @@ public class LuceneVectorSearchService implements VectorSearchService {
                 // 每 100 条 commit 一次
                 if (count % 100 == 0) {
                     writer.commit();
-                    System.out.println("[LuceneVectorSearch] 已索引 " + count + " 条");
+                    logger.debug("已索引 {} 条", count);
                 }
             }
             
             writer.commit();
             refreshReader();
             
-            System.out.println("[LuceneVectorSearch] 批量索引完成，共 " + count + " 条");
+            logger.info("批量索引完成，共 {} 条", count);
             
         } catch (Exception e) {
-            System.err.println("[LuceneVectorSearch] 批量索引失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("批量索引失败: {}", e.getMessage(), e);
         } finally {
             lock.writeLock().unlock();
         }
@@ -217,9 +218,9 @@ public class LuceneVectorSearchService implements VectorSearchService {
             writer.deleteDocuments(new Term(FIELD_NOTE_KEY, noteKey));
             writer.commit();
             refreshReader();
-            System.out.println("[LuceneVectorSearch] 已移除笔记索引: " + noteKey);
+            logger.debug("已移除笔记索引: {}", noteKey);
         } catch (Exception e) {
-            System.err.println("[LuceneVectorSearch] 移除索引失败: " + e.getMessage());
+            logger.error("移除索引失败: {}", e.getMessage(), e);
         } finally {
             lock.writeLock().unlock();
         }
@@ -241,13 +242,13 @@ public class LuceneVectorSearchService implements VectorSearchService {
         lock.readLock().lock();
         try {
             // 调试：打印查询内容和索引数量
-            System.out.println("[LuceneVectorSearch] 搜索查询: " + query);
-            System.out.println("[LuceneVectorSearch] 当前索引数量: " + getIndexedCount());
+            logger.debug("搜索查询: {}", query);
+            logger.debug("当前索引数量: {}", getIndexedCount());
             
             // 查询文本转向量
             float[] queryVector = embeddingService.embed(query);
             if (queryVector == null) {
-                System.err.println("[LuceneVectorSearch] 查询向量生成失败");
+                logger.error("查询向量生成失败");
                 return results;
             }
             
@@ -255,7 +256,7 @@ public class LuceneVectorSearchService implements VectorSearchService {
             KnnFloatVectorQuery knnQuery = new KnnFloatVectorQuery(FIELD_VECTOR, queryVector, topK);
             TopDocs topDocs = searcher.search(knnQuery, topK);
             
-            System.out.println("[LuceneVectorSearch] 搜索结果数: " + topDocs.scoreDocs.length);
+            logger.debug("搜索结果数: {}", topDocs.scoreDocs.length);
             
             for (ScoreDoc scoreDoc : topDocs.scoreDocs) {
                 Document doc = searcher.storedFields().document(scoreDoc.doc);
@@ -274,11 +275,11 @@ public class LuceneVectorSearchService implements VectorSearchService {
                 result.totalScore = result.score + result.keywordScore;
                 
                 // 调试：打印每个结果
-                System.out.println("[LuceneVectorSearch] 结果: noteKey=" + result.noteKey + 
-                    ", h1Title=" + result.h1Title + 
-                    ", V=" + String.format("%.2f", result.score) + 
-                    ", K=" + String.format("%.2f", result.keywordScore) + 
-                    ", T=" + String.format("%.2f", result.totalScore));
+                logger.debug("结果: noteKey={}, h1Title={}, V={}, K={}, T={}", 
+                    result.noteKey, result.h1Title, 
+                    String.format("%.2f", result.score),
+                    String.format("%.2f", result.keywordScore),
+                    String.format("%.2f", result.totalScore));
                 
                 results.add(result);
             }
@@ -287,8 +288,7 @@ public class LuceneVectorSearchService implements VectorSearchService {
             results.sort((a, b) -> Float.compare(b.totalScore, a.totalScore));
             
         } catch (Exception e) {
-            System.err.println("[LuceneVectorSearch] 搜索失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("搜索失败: {}", e.getMessage(), e);
         } finally {
             lock.readLock().unlock();
         }
@@ -402,9 +402,9 @@ public class LuceneVectorSearchService implements VectorSearchService {
             writer.deleteAll();
             writer.commit();
             refreshReader();
-            System.out.println("[LuceneVectorSearch] 已清空所有索引");
+            logger.info("已清空所有索引");
         } catch (Exception e) {
-            System.err.println("[LuceneVectorSearch] 清空索引失败: " + e.getMessage());
+            logger.error("清空索引失败: {}", e.getMessage(), e);
         } finally {
             lock.writeLock().unlock();
         }

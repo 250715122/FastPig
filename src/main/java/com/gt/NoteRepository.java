@@ -1,5 +1,8 @@
 package com.gt;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import java.sql.*;
 import java.util.*;
 
@@ -9,6 +12,8 @@ import java.util.*;
  * 保留 body_md 字段用于向后兼容和数据迁移
  */
 public class NoteRepository {
+    
+    private static final Logger logger = LogManager.getLogger(NoteRepository.class);
     private final String dbPath;
 
     public NoteRepository(String dbPath) {
@@ -59,7 +64,7 @@ public class NoteRepository {
             ResultSet rs = conn.getMetaData().getColumns(null, null, "snippets", columnName);
             if (!rs.next()) {
                 st.execute("ALTER TABLE snippets ADD COLUMN " + columnName + " " + columnType);
-                System.out.println("[NoteRepository] 添加新列: " + columnName);
+                logger.debug("添加新列: {}", columnName);
             }
         } catch (SQLException e) {
             // 忽略错误，可能列已存在
@@ -348,7 +353,7 @@ public class NoteRepository {
             ps.setString(1, id);
             ps.executeUpdate();
         } catch (SQLException e) {
-            System.err.println("[NoteRepository] 清空 body_md 失败: " + e.getMessage());
+            logger.error("清空 body_md 失败: {}", e.getMessage(), e);
         }
     }
 

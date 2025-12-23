@@ -2,6 +2,9 @@ package com.gt.vector;
 
 import ai.onnxruntime.*;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -16,6 +19,8 @@ import java.util.function.Consumer;
  * 模型文件需放在 models/ 目录下
  */
 public class EmbeddingService {
+    
+    private static final Logger logger = LogManager.getLogger(EmbeddingService.class);
     
     private static final String MODEL_DIR = "models";
     private static final String MODEL_FILE = "bge-small-zh-v1.5.onnx";
@@ -69,7 +74,7 @@ public class EmbeddingService {
             
             if (!Files.exists(modelPath) || !Files.exists(vocabPath)) {
                 errorMessage = "模型文件不存在，请先下载模型";
-                System.out.println("[EmbeddingService] " + errorMessage);
+                logger.warn(errorMessage);
                 return;
             }
             
@@ -84,12 +89,11 @@ public class EmbeddingService {
             session = env.createSession(modelPath.toString(), opts);
             
             available = true;
-            System.out.println("[EmbeddingService] 模型加载成功，向量维度: " + VECTOR_DIM);
+            logger.info("模型加载成功，向量维度: {}", VECTOR_DIM);
             
         } catch (Exception e) {
             errorMessage = "模型加载失败: " + e.getMessage();
-            System.err.println("[EmbeddingService] " + errorMessage);
-            e.printStackTrace();
+            logger.error(errorMessage, e);
         }
     }
     
@@ -100,7 +104,7 @@ public class EmbeddingService {
      */
     public float[] embed(String text) {
         if (!available || session == null) {
-            System.err.println("[EmbeddingService] 服务不可用");
+            logger.error("服务不可用");
             return null;
         }
         
@@ -158,8 +162,7 @@ public class EmbeddingService {
             return embedding;
             
         } catch (Exception e) {
-            System.err.println("[EmbeddingService] 向量化失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("向量化失败: {}", e.getMessage(), e);
             return null;
         }
     }
@@ -218,7 +221,7 @@ public class EmbeddingService {
             Path vocabPath = modelDir.resolve(VOCAB_FILE);
             
             // 下载模型文件
-            System.out.println("[EmbeddingService] 开始下载模型: " + MODEL_URL);
+            logger.info("开始下载模型: {}", MODEL_URL);
             if (!downloadFile(MODEL_URL, modelPath, progress -> {
                 if (progressCallback != null) {
                     progressCallback.accept(progress * 0.9); // 模型占 90%
@@ -228,7 +231,7 @@ public class EmbeddingService {
             }
             
             // 下载词汇表
-            System.out.println("[EmbeddingService] 开始下载词汇表: " + VOCAB_URL);
+            logger.info("开始下载词汇表: {}", VOCAB_URL);
             if (!downloadFile(VOCAB_URL, vocabPath, progress -> {
                 if (progressCallback != null) {
                     progressCallback.accept(0.9 + progress * 0.1); // 词汇表占 10%
@@ -237,12 +240,11 @@ public class EmbeddingService {
                 return false;
             }
             
-            System.out.println("[EmbeddingService] 模型下载完成");
+            logger.info("模型下载完成");
             return true;
             
         } catch (Exception e) {
-            System.err.println("[EmbeddingService] 下载失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("下载失败: {}", e.getMessage(), e);
             return false;
         }
     }
@@ -288,7 +290,7 @@ public class EmbeddingService {
         if (vocab.containsKey("[PAD]")) padTokenId = vocab.get("[PAD]");
         if (vocab.containsKey("[UNK]")) unkTokenId = vocab.get("[UNK]");
         
-        System.out.println("[EmbeddingService] 词汇表加载完成，共 " + vocab.size() + " 词");
+        logger.info("词汇表加载完成，共 {} 词", vocab.size());
     }
     
     /**
@@ -457,7 +459,7 @@ public class EmbeddingService {
             
             int responseCode = conn.getResponseCode();
             if (responseCode != 200) {
-                System.err.println("[EmbeddingService] 下载失败，HTTP " + responseCode);
+                logger.error("下载失败，HTTP {}", responseCode);
                 return false;
             }
             
@@ -483,8 +485,7 @@ public class EmbeddingService {
             return true;
             
         } catch (Exception e) {
-            System.err.println("[EmbeddingService] 下载异常: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("下载异常: {}", e.getMessage(), e);
             return false;
         }
     }

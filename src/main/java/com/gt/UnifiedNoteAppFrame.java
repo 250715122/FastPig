@@ -779,7 +779,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                     e.getKeyCode() == java.awt.event.KeyEvent.VK_P &&
                     (e.isAltDown() || e.isAltGraphDown())) {
                     
-                    System.out.println("KeyEventDispatcher 捕获到 Alt+P，触发预览切换");
+                    logger.debug("KeyEventDispatcher 捕获到 Alt+P，触发预览切换");
                     SwingUtilities.invokeLater(() -> toggleInAppPreview());
                     return true; // 消费此事件
                 }
@@ -788,7 +788,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                     e.getKeyCode() == java.awt.event.KeyEvent.VK_F &&
                     (e.isAltDown() || e.isAltGraphDown())) {
                     
-                    System.out.println("KeyEventDispatcher 捕获到 Alt+F，触发全屏预览切换");
+                    logger.debug("KeyEventDispatcher 捕获到 Alt+F，触发全屏预览切换");
                     SwingUtilities.invokeLater(() -> toggleFullscreenPreview());
                     return true; // 消费此事件
                 }
@@ -796,7 +796,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                 if (e.getID() == java.awt.event.KeyEvent.KEY_PRESSED &&
                     e.getKeyCode() == java.awt.event.KeyEvent.VK_D &&
                     (e.isAltDown() || e.isAltGraphDown())) {
-                    System.out.println("KeyEventDispatcher 捕获到 Alt+D，触发删除(软)");
+                    logger.debug("KeyEventDispatcher 捕获到 Alt+D，触发删除(软)");
                     SwingUtilities.invokeLater(() -> deleteCurrent());
                     return true;
                 }
@@ -804,7 +804,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                 if (e.getID() == java.awt.event.KeyEvent.KEY_PRESSED &&
                     e.getKeyCode() == java.awt.event.KeyEvent.VK_Z &&
                     (e.isAltDown() || e.isAltGraphDown())) {
-                    System.out.println("KeyEventDispatcher 捕获到 Alt+Z，撤销删除");
+                    logger.debug("KeyEventDispatcher 捕获到 Alt+Z，撤销删除");
                     SwingUtilities.invokeLater(() -> undoSoftDelete());
                     return true;
                 }
@@ -856,9 +856,9 @@ public class UnifiedNoteAppFrame extends JFrame {
                 // 应用主题
                 vsm.applyTheme(ThemeManager.getInstance().getCurrentTheme() == ThemeManager.Theme.DARK);
                 
-                System.out.println("[UnifiedNoteAppFrame] 向量检索服务初始化完成");
+                logger.info("向量检索服务初始化完成");
             } catch (Exception e) {
-                System.err.println("[UnifiedNoteAppFrame] 向量检索服务初始化失败: " + e.getMessage());
+                logger.error("向量检索服务初始化失败: {}", e.getMessage(), e);
             }
         }, "VectorSearch-Init").start();
     }
@@ -1020,9 +1020,9 @@ public class UnifiedNoteAppFrame extends JFrame {
             // 显示提示浮标
             showPreviewBadge("全屏预览（Alt+F退出，Alt+T切换目录）");
             
-            System.out.println("[预览] 已进入全屏预览模式");
+            logger.debug("[预览] 已进入全屏预览模式");
         } catch (Exception e) {
-            System.err.println("[预览] 进入全屏预览失败: " + e.getMessage());
+            logger.error("[预览] 进入全屏预览失败: {}", e.getMessage(), e);
         }
     }
     
@@ -1074,9 +1074,9 @@ public class UnifiedNoteAppFrame extends JFrame {
             // 显示提示浮标
             showPreviewBadge("分屏预览（Alt+P退出，Alt+T切换目录）");
             
-            System.out.println("[预览] 已退出全屏预览模式");
+            logger.debug("[预览] 已退出全屏预览模式");
         } catch (Exception e) {
-            System.err.println("[预览] 退出全屏预览失败: " + e.getMessage());
+            logger.error("[预览] 退出全屏预览失败: {}", e.getMessage(), e);
         }
     }
     
@@ -1124,12 +1124,12 @@ public class UnifiedNoteAppFrame extends JFrame {
                 
                 String msg = tocVisible ? "目录已显示" : "目录已隐藏";
                 showPreviewBadge(msg);
-                System.out.println("[TOC] " + msg);
+                logger.debug("[TOC] {}", msg);
                 
                 // 焦点返回到编辑区
                 SwingUtilities.invokeLater(() -> bodyArea.requestFocusInWindow());
             } catch (Exception e) {
-                System.err.println("[TOC] 切换目录失败: " + e.getMessage());
+                logger.error("[TOC] 切换目录失败: {}", e.getMessage(), e);
             }
         } else {
             // 普通编辑模式下切换目录
@@ -1180,13 +1180,12 @@ public class UnifiedNoteAppFrame extends JFrame {
                 
                 String msg = tocVisibleInEditMode ? "目录已显示" : "目录已隐藏";
                 showPreviewBadge(msg);
-                System.out.println("[TOC] 编辑模式 - " + msg);
+                logger.debug("[TOC] 编辑模式 - {}", msg);
                 
                 // 焦点返回到编辑区
                 SwingUtilities.invokeLater(() -> bodyArea.requestFocusInWindow());
             } catch (Exception e) {
-                System.err.println("[TOC] 编辑模式切换目录失败: " + e.getMessage());
-                e.printStackTrace();
+                logger.error("[TOC] 编辑模式切换目录失败: {}", e.getMessage(), e);
             }
         }
     }
@@ -1377,7 +1376,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                 });
             }
         } catch (Exception e) {
-            System.err.println("[TOC] 跳转失败: " + e.getMessage());
+            logger.error("[TOC] 跳转失败: {}", e.getMessage(), e);
         }
     }
     
@@ -1498,8 +1497,8 @@ public class UnifiedNoteAppFrame extends JFrame {
         
         try {
             String snippet = mdWithImgs.length() > 200 ? mdWithImgs.substring(0, 200) + "..." : mdWithImgs;
-            System.out.println("[预览] Markdown 片段: \n" + snippet);
-            System.out.println("[预览] 是否包含<table>: " + (html.contains("<table") ? "是" : "否"));
+            logger.debug("[预览] Markdown 片段: {}", snippet);
+            logger.debug("[预览] 是否包含<table>: {}", (html.contains("<table") ? "是" : "否"));
         } catch (Exception ignore) {}
         
         // 构建完整的 HTML（使用动态主题样式）
@@ -1644,38 +1643,37 @@ public class UnifiedNoteAppFrame extends JFrame {
      */
     private String convertMermaidToImageTag(String mermaidCode) {
         try {
-            System.out.println("[Mermaid] 原始代码长度: " + mermaidCode.length() + " 字符");
+            logger.debug("[Mermaid] 原始代码长度: {} 字符", mermaidCode.length());
             
             // 步骤1: 清理特殊字符
             String cleanedCode = cleanMermaidCode(mermaidCode);
-            System.out.println("[Mermaid] 清理后代码:\n" + cleanedCode);
+            logger.debug("[Mermaid] 清理后代码:\n{}", cleanedCode);
             
             // 步骤2: 语法预处理（兼容性转换）
             String processedCode = preprocessMermaidCode(cleanedCode);
             if (!processedCode.equals(cleanedCode)) {
-                System.out.println("[Mermaid] 预处理后代码:\n" + processedCode);
+                logger.debug("[Mermaid] 预处理后代码:\n{}", processedCode);
             }
             
             // 使用 kroki.io API（POST 方式，避免 URL 长度限制）
             String apiUrl = "https://kroki.io/mermaid/png";
-            System.out.println("[Mermaid] 使用 Kroki API (POST): " + apiUrl);
+            logger.debug("[Mermaid] 使用 Kroki API (POST): {}", apiUrl);
             
             // 下载图片到本地（使用 POST 方式）
             File localImageFile = downloadMermaidImagePost(apiUrl, processedCode);
             
             if (localImageFile != null && localImageFile.exists()) {
                 String localUrl = localImageFile.toURI().toString();
-                System.out.println("[Mermaid] 本地图片路径: " + localUrl);
+                logger.debug("[Mermaid] 本地图片路径: {}", localUrl);
                 return "\n<img src='" + localUrl + "' alt='Mermaid Diagram' style='max-width:100%; display:block; margin:10px auto;'/>\n";
             } else {
-                System.err.println("[Mermaid] 图片下载失败");
+                logger.error("[Mermaid] 图片下载失败");
                 return "\n<div style='color:orange; border:1px solid orange; padding:10px; margin:10px;'>" +
                        "⚠️ Mermaid 图表加载失败，请检查网络连接</div>\n";
             }
             
         } catch (Exception e) {
-            System.err.println("[Mermaid] 转换失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("[Mermaid] 转换失败: {}", e.getMessage(), e);
             return "\n<div style='color:red; border:1px solid red; padding:10px; margin:10px;'>" +
                    "❌ Mermaid 图表转换失败<br/>" +
                    "错误: " + e.getMessage() + "</div>\n";
@@ -1702,12 +1700,12 @@ public class UnifiedNoteAppFrame extends JFrame {
             
             // 如果文件已存在，直接返回（缓存）
             if (localFile.exists() && localFile.length() > 0) {
-                System.out.println("[Mermaid] 使用缓存图片: " + fileName);
+                logger.debug("[Mermaid] 使用缓存图片: {}", fileName);
                 return localFile;
             }
             
             // 使用 POST 请求下载图片
-            System.out.println("[Mermaid] 正在通过 POST 请求下载图片...");
+            logger.debug("[Mermaid] 正在通过 POST 请求下载图片...");
             java.net.URL url = new java.net.URL(apiUrl);
             java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
@@ -1723,7 +1721,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             os.close();
             
             int responseCode = conn.getResponseCode();
-            System.out.println("[Mermaid] HTTP 响应码: " + responseCode);
+            logger.debug("[Mermaid] HTTP 响应码: {}", responseCode);
             
             if (responseCode == 200) {
                 // 读取图片数据
@@ -1739,7 +1737,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                 out.close();
                 in.close();
                 
-                System.out.println("[Mermaid] 图片下载成功: " + localFile.length() + " 字节");
+                logger.debug("[Mermaid] 图片下载成功: {} 字节", localFile.length());
                 return localFile;
             } else {
                 // 读取错误信息
@@ -1753,15 +1751,14 @@ public class UnifiedNoteAppFrame extends JFrame {
                         errorMsg.append(line).append("\n");
                     }
                     reader.close();
-                    System.err.println("[Mermaid] 服务器错误信息: " + errorMsg.toString());
+                    logger.error("[Mermaid] 服务器错误信息: {}", errorMsg.toString());
                 }
-                System.err.println("[Mermaid] HTTP 错误: " + responseCode);
+                logger.error("[Mermaid] HTTP 错误: {}", responseCode);
                 return null;
             }
             
         } catch (Exception e) {
-            System.err.println("[Mermaid] 下载失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("[Mermaid] 下载失败: {}", e.getMessage(), e);
             return null;
         }
     }
@@ -2017,13 +2014,13 @@ public class UnifiedNoteAppFrame extends JFrame {
         if (q == null) q = "";
         
         // 调试日志
-        System.out.println("[updateSuggestions] q='" + q + "', isVectorTrigger=" + VectorSearchManager.isVectorSearchTrigger(q));
+        logger.debug("[updateSuggestions] q='{}', isVectorTrigger={}", q, VectorSearchManager.isVectorSearchTrigger(q));
         
         if (q.isEmpty()) { suggestPopup.setVisible(false); return; }
         
         // 检查是否为向量检索触发（直接输入触发，: 或 ： 开头不触发）
         if (VectorSearchManager.isVectorSearchTrigger(q)) {
-            System.out.println("[updateSuggestions] 触发向量检索分支, q='" + q + "'");
+            logger.debug("[updateSuggestions] 触发向量检索分支, q='{}'", q);
             suggestPopup.setVisible(false);
             // 交给 VectorSearchManager 处理（带 debounce）
             VectorSearchManager.getInstance().onInputChanged(q, bodyArea);
@@ -2102,17 +2099,17 @@ public class UnifiedNoteAppFrame extends JFrame {
                     n = full;
                 }
             } catch (Exception e) {
-                System.err.println("加载笔记正文失败: " + n.id + " - " + e.getMessage());
+                logger.error("加载笔记正文失败: {} - {}", n.id, e.getMessage());
             }
-            current = n;
-            String first = (n.key==null? "" : n.key) + (n.desc!=null && !n.desc.isEmpty()? (" " + n.desc) : "");
-            String body = n.bodyMd==null? "" : n.bodyMd;
-            if (!body.startsWith("\n") && !body.isEmpty()) body = "\n" + body;
-            bodyArea.setText(first + body);
-            // 将光标移到文档开头（首行末尾）
-            bodyArea.setCaretPosition(first.length());
-            updateFirstLineHighlight();
-            updateEditorStatus();
+        current = n;
+        String first = (n.key==null? "" : n.key) + (n.desc!=null && !n.desc.isEmpty()? (" " + n.desc) : "");
+        String body = n.bodyMd==null? "" : n.bodyMd;
+        if (!body.startsWith("\n") && !body.isEmpty()) body = "\n" + body;
+        bodyArea.setText(first + body);
+        // 将光标移到文档开头（首行末尾）
+        bodyArea.setCaretPosition(first.length());
+        updateFirstLineHighlight();
+        updateEditorStatus();
         } finally {
             isLoading = false; // 加载完成
         }
@@ -2384,7 +2381,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                 existingAll.updatedAt = System.currentTimeMillis();
                 existingAll.version++;
                 repository.save(existingAll);
-                System.out.println("[all命令] 已更新");
+                logger.debug("[all命令] 已更新");
             } else {
                 // 创建新的 all 命令
                 NoteDto allCommand = new NoteDto();
@@ -2401,11 +2398,10 @@ public class UnifiedNoteAppFrame extends JFrame {
                 allCommand.updatedAt = now;
                 allCommand.version = 1;
                 repository.save(allCommand);
-                System.out.println("[all命令] 已创建");
+                logger.debug("[all命令] 已创建");
             }
         } catch (Exception e) {
-            System.err.println("[all命令] 初始化失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("[all命令] 初始化失败: {}", e.getMessage(), e);
         }
     }
 
@@ -2456,12 +2452,12 @@ public class UnifiedNoteAppFrame extends JFrame {
             if (iconStream != null) {
                 BufferedImage iconImage = javax.imageio.ImageIO.read(iconStream);
                 setIconImage(iconImage);
-                System.out.println("[图标] 窗口图标加载成功");
+                logger.debug("[图标] 窗口图标加载成功");
             } else {
-                System.err.println("[图标] 未找到图标文件: /icons/FastPig.png");
+                logger.warn("[图标] 未找到图标文件: /icons/FastPig.png");
             }
         } catch (Exception e) {
-            System.err.println("[图标] 加载窗口图标失败: " + e.getMessage());
+            logger.error("[图标] 加载窗口图标失败: {}", e.getMessage(), e);
         }
     }
 
@@ -2471,7 +2467,7 @@ public class UnifiedNoteAppFrame extends JFrame {
     private void initSystemTray() {
         // 检查系统是否支持托盘
         if (!SystemTray.isSupported()) {
-            System.out.println("[托盘] 系统不支持托盘功能");
+            logger.warn("[托盘] 系统不支持托盘功能");
             return;
         }
 
@@ -2506,11 +2502,10 @@ public class UnifiedNoteAppFrame extends JFrame {
             // 添加到系统托盘
             tray.add(trayIcon);
             
-            System.out.println("[托盘] 系统托盘初始化成功");
+            logger.debug("[托盘] 系统托盘初始化成功");
             
         } catch (Exception e) {
-            System.err.println("[托盘] 初始化失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("[托盘] 初始化失败: {}", e.getMessage(), e);
         }
     }
 
@@ -2531,11 +2526,11 @@ public class UnifiedNoteAppFrame extends JFrame {
                 g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 g.drawImage(originalImage, 0, 0, 16, 16, null);
                 g.dispose();
-                System.out.println("[托盘] 托盘图标加载成功");
+                logger.debug("[托盘] 托盘图标加载成功");
                 return scaledImage;
             }
         } catch (Exception e) {
-            System.err.println("[托盘] 加载图标失败，使用默认图标: " + e.getMessage());
+            logger.warn("[托盘] 加载图标失败，使用默认图标: {}", e.getMessage());
         }
         
         // 后备方案：创建简单的默认图标
@@ -2568,7 +2563,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                 "Double-click tray icon or right-click [Show Window] to restore",
                 TrayIcon.MessageType.INFO
             );
-            System.out.println("[托盘] 窗口已隐藏到托盘");
+            logger.debug("[托盘] 窗口已隐藏到托盘");
         } else {
             // 如果托盘不可用，则最小化窗口
             setState(Frame.ICONIFIED);
@@ -2583,19 +2578,19 @@ public class UnifiedNoteAppFrame extends JFrame {
         setState(Frame.NORMAL);
         toFront();
         requestFocus();
-        System.out.println("[托盘] 从托盘恢复窗口");
+        logger.debug("[托盘] 从托盘恢复窗口");
     }
 
     /**
      * 退出应用程序（同步数据后退出）
      */
     private void exitApplication() {
-        System.out.println("[退出] 正在同步数据库到云端（最多等待5秒）...");
+        logger.info("[退出] 正在同步数据库到云端（最多等待5秒）...");
         boolean synced = DbSyncService.getInstance().syncToCloudWithTimeout(5);
         if (synced) {
-            System.out.println("[退出] 同步完成，退出程序");
+            logger.info("[退出] 同步完成，退出程序");
         } else {
-            System.out.println("[退出] 同步跳过或超时，直接退出程序");
+            logger.info("[退出] 同步跳过或超时，直接退出程序");
         }
         
         // 移除托盘图标
@@ -3772,7 +3767,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                         }
                     }
                 } catch (Exception e) {
-                    System.err.println("[ImagePaste] 粘贴失败: " + e.getMessage());
+                    logger.error("[ImagePaste] 粘贴失败: {}", e.getMessage(), e);
                 }
                 
                 // 非图片粘贴，交给原处理器
@@ -3814,7 +3809,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                 }
             }
         } catch (Exception e) {
-            System.err.println("[ImagePaste] 检测剪贴板失败: " + e.getMessage());
+            logger.error("[ImagePaste] 检测剪贴板失败: {}", e.getMessage(), e);
         }
         return false;
     }
@@ -3853,7 +3848,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             
             // 保存图片
             ImageIO.write(image, format, imagePath.toFile());
-            System.out.println("[ImagePaste] 图片已保存: " + imagePath);
+            logger.debug("[ImagePaste] 图片已保存: {}", imagePath);
             
             // 在光标位置插入 Markdown 图片引用
             String markdownRef = "![](assets/" + fileName + ")";
@@ -3863,8 +3858,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             return true;
             
         } catch (Exception e) {
-            System.err.println("[ImagePaste] 保存图片失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("[ImagePaste] 保存图片失败: {}", e.getMessage(), e);
             JOptionPane.showMessageDialog(this, "保存图片失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
             return false;
         }
@@ -3911,7 +3905,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             
             // 复制文件
             Files.copy(sourceFile.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
-            System.out.println("[ImagePaste] 图片已复制: " + targetPath);
+            logger.debug("[ImagePaste] 图片已复制: {}", targetPath);
             
             // 在光标位置插入 Markdown 图片引用
             String markdownRef = "![](assets/" + fileName + ")";
@@ -3921,8 +3915,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             return true;
             
         } catch (Exception e) {
-            System.err.println("[ImagePaste] 复制图片失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("[ImagePaste] 复制图片失败: {}", e.getMessage(), e);
             JOptionPane.showMessageDialog(this, "复制图片失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
             return false;
         }
@@ -3981,10 +3974,10 @@ public class UnifiedNoteAppFrame extends JFrame {
                 "$1" + fileUri + "assets/$2"
             );
             
-            System.out.println("[预览] 图片路径已转换，基础路径: " + fileUri);
+            logger.debug("[预览] 图片路径已转换，基础路径: {}", fileUri);
             
         } catch (Exception e) {
-            System.err.println("[预览] 图片路径转换失败: " + e.getMessage());
+            logger.error("[预览] 图片路径转换失败: {}", e.getMessage(), e);
         }
         
         return html;

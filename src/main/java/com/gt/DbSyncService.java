@@ -18,7 +18,7 @@ import java.util.function.Consumer;
 
 /**
  * 数据同步服务
- * 
+ *
  * 改造后使用文件级增量同步：
  * - 笔记存储为独立的 Markdown 文件夹
  * - 只同步 notes/ 目录，不同步 SQLite 数据库
@@ -77,8 +77,8 @@ public class DbSyncService {
      */
     public boolean syncFromCloudOnStart() {
         return syncFromCloudOnStart(null);
-    }
-
+        }
+        
     /**
      * 启动时同步策略：
      * - 文件同步模式：智能决定上传/下载
@@ -91,8 +91,8 @@ public class DbSyncService {
         if (useFileSync) {
             // 文件同步模式
             fileSync.syncOnStart(statusCallback);
-            return true;
-        }
+                return true;
+            }
         
         // 旧的整库同步模式（保留向后兼容）
         return legacySyncFromCloudOnStart();
@@ -171,7 +171,7 @@ public class DbSyncService {
         // 旧的整库同步模式
         return legacySyncFromCloud();
     }
-
+        
     // ===== 以下是旧的整库同步方法（保留向后兼容）=====
 
     /**
@@ -182,8 +182,8 @@ public class DbSyncService {
         if (webdavSync.isEnabled()) {
             webdavSync.syncFromCloudOnStart();
         }
-        return false;
-    }
+            return false;
+        }
 
     /**
      * 旧模式：上传整个数据库到云端

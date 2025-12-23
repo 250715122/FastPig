@@ -2,8 +2,6 @@ package com.gt.service;
 
 import com.gt.NoteDto;
 import com.gt.NoteRepository;
-import com.gt.cloud.CloudStorageFactory;
-import com.gt.cloud.CloudStorageProvider;
 import com.gt.storage.NoteFileStorage;
 import com.gt.vector.VectorSearchManager;
 import org.slf4j.Logger;
@@ -286,7 +284,10 @@ public class NoteService {
     /**
      * 清理孤立笔记
      * 删除文件系统中存在但数据库中不存在的笔记文件夹
-     * 同时删除云端对应的文件夹
+     * 
+     * 注意：只清理本地文件，不删除云端文件！
+     * 云端删除只在用户显式删除笔记时触发（通过 syncDeletedNotesToCloud）
+     * 这样可以避免因同步失败导致误删云端数据
      */
     public int cleanupOrphanedNotes() {
         logger.info("[NoteService] 开始清理孤立笔记...");
@@ -298,10 +299,6 @@ public class NoteService {
         }
         
         int deletedCount = 0;
-        
-        // 获取云存储提供者
-        CloudStorageProvider cloudProvider = CloudStorageFactory.getProvider();
-        boolean cloudEnabled = cloudProvider != null && cloudProvider.isEnabled();
         
         try {
             // 获取数据库中所有笔记的 key
@@ -330,20 +327,11 @@ public class NoteService {
                         logger.info("[NoteService] 发现孤立笔记: {}", folderName);
                         
                         try {
-                            // 1. 先删除云端（如果启用了云同步）
-                            if (cloudEnabled) {
-                                boolean cloudDeleted = cloudProvider.delete(folderName);
-                                if (cloudDeleted) {
-                                    logger.info("[NoteService] 已从云端删除孤立笔记: {}", folderName);
-                                } else {
-                                    logger.warn("[NoteService] 云端删除失败，继续删除本地: {}", folderName);
-                                }
-                            }
-                            
-                            // 2. 再删除本地
+                            // 只删除本地文件，不删除云端
+                            // 云端删除只在用户显式删除笔记时触发
                             deleteFolder(folder);
                             deletedCount++;
-                            logger.info("[NoteService] 已删除孤立笔记: {}", folderName);
+                            logger.info("[NoteService] 已删除本地孤立笔记: {}", folderName);
                         } catch (Exception e) {
                             logger.error("[NoteService] 删除孤立笔记失败: {} - {}", folderName, e.getMessage());
                         }
@@ -355,7 +343,7 @@ public class NoteService {
             logger.error("[NoteService] 清理孤立笔记失败: {}", e.getMessage(), e);
         }
         
-        logger.info("[NoteService] 清理完成，删除了 {} 个孤立笔记", deletedCount);
+        logger.info("[NoteService] 清理完成，删除了 {} 个本地孤立笔记", deletedCount);
         return deletedCount;
     }
     

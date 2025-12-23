@@ -1,5 +1,8 @@
 package com.gt.vector;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -15,6 +18,8 @@ import java.util.Properties;
  * vector.provider=none | lucene
  */
 public class VectorSearchFactory {
+    
+    private static final Logger logger = LogManager.getLogger(VectorSearchFactory.class);
 
     private static VectorSearchService instance;
     private static LuceneVectorSearchService luceneService;
@@ -63,7 +68,7 @@ public class VectorSearchFactory {
         Properties config = loadConfig();
         String providerName = config.getProperty("vector.provider", "none").toLowerCase().trim();
 
-        System.out.println("[VectorSearchFactory] 向量检索提供者: " + providerName);
+        logger.info("向量检索提供者: {}", providerName);
 
         switch (providerName) {
             case "lucene":
@@ -73,7 +78,7 @@ public class VectorSearchFactory {
                     luceneService = service;
                     return service;
                 } else {
-                    System.err.println("[VectorSearchFactory] Lucene 初始化失败: " + service.getErrorMessage());
+                    logger.error("Lucene 初始化失败: {}", service.getErrorMessage());
                     return NoOpVectorSearchService.getInstance();
                 }
 
@@ -97,7 +102,7 @@ public class VectorSearchFactory {
                 props.load(input);
                 return props;
             } catch (Exception e) {
-                System.err.println("[VectorSearchFactory] 读取配置文件失败: " + e.getMessage());
+                logger.error("读取配置文件失败: {}", e.getMessage(), e);
             }
         }
 
@@ -107,7 +112,7 @@ public class VectorSearchFactory {
                 props.load(input);
             }
         } catch (Exception e) {
-            System.err.println("[VectorSearchFactory] 读取配置文件失败: " + e.getMessage());
+            logger.error("读取配置文件失败: {}", e.getMessage(), e);
         }
 
         return props;

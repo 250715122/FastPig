@@ -4,6 +4,9 @@ import com.gt.UnifiedNoteAppFrame;
 import com.gt.VectorSearchPanel;
 import com.gt.storage.NoteFileStorage;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import javax.swing.*;
 import java.awt.*;
 import java.io.IOException;
@@ -21,6 +24,8 @@ import java.util.function.BiConsumer;
  * 3. 停顿 ≥300ms（debounce）
  */
 public class VectorSearchManager {
+    
+    private static final Logger logger = LogManager.getLogger(VectorSearchManager.class);
     
     // 配置
     private static final int MIN_QUERY_LENGTH = 2;
@@ -62,17 +67,17 @@ public class VectorSearchManager {
      */
     public void initialize(Window parent) {
         this.parentWindow = parent; // 保存引用，用于后续显示下载提示
-        System.out.println("[VectorSearchManager] initialize() 被调用, parentWindow=" + (parent != null));
+        logger.info("initialize() 被调用, parentWindow={}", (parent != null));
         
         // 检查模型是否已下载
         if (!ModelManager.isModelDownloaded()) {
-            System.out.println("[VectorSearchManager] 模型未下载，向量检索功能暂不可用（等待用户触发下载）");
+            logger.info("模型未下载，向量检索功能暂不可用（等待用户触发下载）");
             return;
         }
         
         // 初始化服务
         UnifiedNoteAppFrame.updateStartupStatus("正在加载向量模型...");
-        System.out.println("[VectorSearchManager] 模型已存在，开始初始化 EmbeddingService...");
+        logger.info("模型已存在，开始初始化 EmbeddingService...");
         EmbeddingService.getInstance().initialize();
         searchService = VectorSearchFactory.getLuceneService();
         
@@ -85,14 +90,14 @@ public class VectorSearchManager {
                 }
             });
             
-            System.out.println("[VectorSearchManager] 初始化完成，索引数量: " + searchService.getIndexedCount());
+            logger.info("初始化完成，索引数量: {}", searchService.getIndexedCount());
             
             // 如果索引为空，启动后台全量索引
             if (searchService.getIndexedCount() == 0) {
-                System.out.println("[VectorSearchManager] 索引为空，启动后台全量索引...");
+                logger.info("索引为空，启动后台全量索引...");
                 Path notesDir = Paths.get(System.getProperty("user.dir"), "notes");
                 rebuildAllIndex(notesDir, (current, total) -> {
-                    System.out.println("[VectorSearchManager] 索引进度: " + current + "/" + total);
+                    logger.debug("索引进度: {}/{}", current, total);
                     UnifiedNoteAppFrame.updateStartupStatus("正在创建向量索引 " + current + "/" + total + "...");
                 });
                 UnifiedNoteAppFrame.updateStartupStatus("就绪");
@@ -100,10 +105,10 @@ public class VectorSearchManager {
                 UnifiedNoteAppFrame.updateStartupStatus("就绪");
             }
         } else {
-            System.err.println("[VectorSearchManager] 向量检索服务初始化失败");
+            logger.error("向量检索服务初始化失败");
             if (searchService != null) {
-                System.err.println("[VectorSearchManager] searchService.isAvailable() = " + searchService.isAvailable());
-                System.err.println("[VectorSearchManager] errorMessage = " + searchService.getErrorMessage());
+                logger.error("searchService.isAvailable() = {}", searchService.isAvailable());
+                logger.error("errorMessage = {}", searchService.getErrorMessage());
             }
             UnifiedNoteAppFrame.updateStartupStatus("向量服务初始化失败");
         }
@@ -113,7 +118,7 @@ public class VectorSearchManager {
      * 重新初始化（模型下载完成后调用）
      */
     private void reinitialize() {
-        System.out.println("[VectorSearchManager] reinitialize() 被调用");
+        logger.info("reinitialize() 被调用");
         downloadPromptShown = false;
         if (parentWindow != null) {
             initialize(parentWindow);
@@ -146,7 +151,7 @@ public class VectorSearchManager {
      * @param component 触发组件（用于定位结果面板）
      */
     public void onInputChanged(String input, Component component) {
-        System.out.println("[VectorSearchManager] onInputChanged: input='" + input + "', isAvailable=" + isAvailable());
+        logger.debug("onInputChanged: input='{}', isAvailable={}", input, isAvailable());
         
         // 如果服务不可用，检查是否因为模型未下载
         if (!isAvailable()) {
@@ -156,7 +161,7 @@ public class VectorSearchManager {
                 if (query.length() >= MIN_QUERY_LENGTH) {
                     if (!ModelManager.isModelDownloaded()) {
                         // 模型未下载，提示用户下载
-                        System.out.println("[VectorSearchManager] 模型未下载，准备提示用户下载");
+                        logger.info("模型未下载，准备提示用户下载");
                         if (parentWindow != null && !downloadPromptShown) {
                             downloadPromptShown = true; // 避免重复弹出
                             SwingUtilities.invokeLater(() -> {
@@ -169,7 +174,7 @@ public class VectorSearchManager {
                         }
                     } else {
                         // 模型已下载但服务未初始化，尝试重新初始化
-                        System.out.println("[VectorSearchManager] 模型已下载但服务不可用，尝试重新初始化");
+                        logger.info("模型已下载但服务不可用，尝试重新初始化");
                         reinitialize();
                     }
                 }
@@ -201,7 +206,7 @@ public class VectorSearchManager {
             return;
         }
         
-        System.out.println("[VectorSearchManager] 触发搜索: query='" + query + "'");
+        logger.debug("触发搜索: query='{}'", query);
         
         // 设置 debounce 任务
         debounceTask = scheduler.schedule(() -> {
@@ -213,19 +218,19 @@ public class VectorSearchManager {
      * 执行搜索
      */
     private void performSearch(String query, Component component) {
-        System.out.println("[VectorSearchManager] performSearch: query='" + query + "'");
+        logger.debug("performSearch: query='{}'", query);
         
         if (!isAvailable() || searchService == null) {
-            System.out.println("[VectorSearchManager] performSearch: 服务不可用，跳过搜索");
+            logger.debug("performSearch: 服务不可用，跳过搜索");
             return;
         }
         
         lastQuery = query;
         
         // 执行搜索
-        System.out.println("[VectorSearchManager] 开始向量检索...");
+        logger.debug("开始向量检索...");
         List<LuceneVectorSearchService.VectorSearchResult> results = searchService.search(query, TOP_K);
-        System.out.println("[VectorSearchManager] 检索完成，结果数: " + results.size());
+        logger.debug("检索完成，结果数: {}", results.size());
         
         // 在 EDT 中更新 UI
         SwingUtilities.invokeLater(() -> {
@@ -237,7 +242,7 @@ public class VectorSearchManager {
                 } else {
                     searchPanel.showBelow(component);
                 }
-                System.out.println("[VectorSearchManager] 搜索面板已显示");
+                logger.debug("搜索面板已显示");
             }
         });
     }
@@ -343,10 +348,10 @@ public class VectorSearchManager {
                     searchService.indexH1(block.noteKey, block.noteDesc, block.h1Title, block.indexContent);
                 }
                 
-                System.out.println("[VectorSearchManager] 笔记索引完成: " + noteKey + ", " + blocks.size() + " 个 H1");
+                logger.debug("笔记索引完成: {}, {} 个 H1", noteKey, blocks.size());
                 
             } catch (Exception e) {
-                System.err.println("[VectorSearchManager] 索引笔记失败: " + e.getMessage());
+                logger.error("索引笔记失败: {}", e.getMessage(), e);
             }
         });
     }
@@ -425,7 +430,7 @@ public class VectorSearchManager {
                             }
                             
                         } catch (IOException e) {
-                            System.err.println("[VectorSearchManager] 读取笔记失败: " + noteFile);
+                            logger.error("读取笔记失败: {}", noteFile, e);
                         }
                     }
                     
@@ -436,11 +441,10 @@ public class VectorSearchManager {
                     }
                 }
                 
-                System.out.println("[VectorSearchManager] 全量索引完成，共 " + searchService.getIndexedCount() + " 条");
+                logger.info("全量索引完成，共 {} 条", searchService.getIndexedCount());
                 
             } catch (Exception e) {
-                System.err.println("[VectorSearchManager] 全量索引失败: " + e.getMessage());
-                e.printStackTrace();
+                logger.error("全量索引失败: {}", e.getMessage(), e);
             } finally {
                 indexingInProgress = false;
             }

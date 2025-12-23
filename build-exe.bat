@@ -7,7 +7,7 @@ echo ========================================
 echo.
 
 REM 1. 编译项目
-echo [1/3] 正在编译项目...
+echo [1/5] 正在编译项目...
 set "JAVA_HOME=D:\tools\java\jdk-21.0.8"
 set "PATH=%JAVA_HOME%\bin;%PATH%"
 java -version
@@ -21,14 +21,53 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/3] 清理旧版本...
+echo [2/5] 清理 target 目录中不需要的文件...
+REM 删除依赖目录（已经打进 shaded jar）
+if exist target\dependency (
+    rmdir /s /q target\dependency
+    echo 已删除 dependency 目录
+)
+REM 删除编译类文件目录
+if exist target\classes (
+    rmdir /s /q target\classes
+    echo 已删除 classes 目录
+)
+REM 删除其他构建产物
+if exist target\generated-sources (
+    rmdir /s /q target\generated-sources
+    echo 已删除 generated-sources 目录
+)
+if exist target\maven-status (
+    rmdir /s /q target\maven-status
+    echo 已删除 maven-status 目录
+)
+if exist target\archive-tmp (
+    rmdir /s /q target\archive-tmp
+    echo 已删除 archive-tmp 目录
+)
+if exist target\maven-archiver (
+    rmdir /s /q target\maven-archiver
+    echo 已删除 maven-archiver 目录
+)
+REM 删除原始 jar（只保留 shaded jar）
+if exist target\FastPig-0.0.1-SNAPSHOT.jar (
+    del /q target\FastPig-0.0.1-SNAPSHOT.jar
+    echo 已删除原始 jar
+)
+if exist target\original-FastPig-0.0.1-SNAPSHOT.jar (
+    del /q target\original-FastPig-0.0.1-SNAPSHOT.jar
+    echo 已删除 original jar
+)
+
+echo.
+echo [3/5] 清理旧版本...
 if exist FastPig (
     rmdir /s /q FastPig
     echo 已删除旧的 FastPig 目录
 )
 
 echo.
-echo [3/3] 正在生成 EXE 文件...
+echo [4/5] 正在生成 EXE 文件...
 echo.
 
 REM 2. 使用 Java 21 的 jpackage
@@ -84,13 +123,11 @@ if errorlevel 1 (
 )
 
 echo.
-echo [4/4] 复制配置文件...
+echo [5/5] 复制配置文件...
 if exist config.properties (
     copy config.properties FastPig\config.properties
     echo 已复制 config.properties 到 FastPig 目录
 )
-echo.
-echo [5/5] 完成！
 echo.
 echo ========================================
 echo  ✅ 成功！

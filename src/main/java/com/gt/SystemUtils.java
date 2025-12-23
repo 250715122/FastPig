@@ -1,5 +1,8 @@
 package com.gt;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 
@@ -7,6 +10,8 @@ import java.io.InputStreamReader;
  * 系统工具类 - 用于检测系统权限和环境信息
  */
 public class SystemUtils {
+    
+    private static final Logger logger = LogManager.getLogger(SystemUtils.class);
     
     /**
      * 检查是否以管理员权限运行
@@ -67,15 +72,10 @@ public class SystemUtils {
      * 打印系统诊断信息
      */
     public static void printSystemDiagnostics() {
-        System.out.println("=== 系统诊断信息 ===");
-        System.out.println("操作系统: " + getOSName());
-        System.out.println("系统架构: " + getSystemArchitecture());
-        System.out.println("64位系统: " + (is64BitSystem() ? "是" : "否"));
-        System.out.println("Java版本: " + getJavaVersion());
-        System.out.println("管理员权限: " + (isRunningAsAdmin() ? "是" : "否"));
-        System.out.println("当前用户: " + System.getProperty("user.name"));
-        System.out.println("工作目录: " + System.getProperty("user.dir"));
-        System.out.println("==================");
+        logger.info("=== 系统诊断信息 ===");
+        logger.info("操作系统: {}, 架构: {}, 64位: {}", getOSName(), getSystemArchitecture(), is64BitSystem());
+        logger.info("Java版本: {}, 管理员: {}", getJavaVersion(), isRunningAsAdmin());
+        logger.info("用户: {}, 工作目录: {}", System.getProperty("user.name"), System.getProperty("user.dir"));
     }
     
     /**

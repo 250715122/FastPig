@@ -145,28 +145,6 @@
         </configuration>
       </plugin>
       
-      <!-- 依赖复制插件 -->
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-dependency-plugin</artifactId>
-        <version>3.2.0</version>
-        <executions>
-          <execution>
-            <id>copy-dependencies</id>
-            <phase>compile</phase>
-            <goals>
-              <goal>copy-dependencies</goal>
-            </goals>
-            <configuration>
-              <outputDirectory>${project.build.directory}/dependency</outputDirectory>
-              <overWriteReleases>false</overWriteReleases>
-              <overWriteSnapshots>false</overWriteSnapshots>
-              <overWriteIfNewer>true</overWriteIfNewer>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
-      
       <!-- 资源插件，确保DLL文件被复制 -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -194,25 +172,76 @@
         </executions>
       </plugin>
       
+      <!-- maven-shade-plugin: 打包并裁剪非 Windows 平台的本地库 -->
       <plugin>
-        <artifactId>maven-assembly-plugin</artifactId>
-        <configuration>
-          <descriptorRefs>
-            <descriptorRef>jar-with-dependencies</descriptorRef>
-          </descriptorRefs>
-          <archive>
-            <manifest>
-              <mainClass>com.gt.FastPigApplication</mainClass>
-            </manifest>
-          </archive>
-        </configuration>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.5.1</version>
         <executions>
           <execution>
-            <id>make-assembly</id>
             <phase>package</phase>
             <goals>
-              <goal>single</goal>
+              <goal>shade</goal>
             </goals>
+            <configuration>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>com.gt.FastPigApplication</mainClass>
+                  <manifestEntries>
+                    <Multi-Release>true</Multi-Release>
+                  </manifestEntries>
+                </transformer>
+                <!-- 合并 Log4j 插件缓存文件 -->
+                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                  <resource>META-INF/org/apache/logging/log4j/core/config/plugins/Log4j2Plugins.dat</resource>
+                </transformer>
+              </transformers>
+              <filters>
+                <!-- ONNX Runtime: 只保留 Windows 平台本地库 -->
+                <filter>
+                  <artifact>com.microsoft.onnxruntime:onnxruntime</artifact>
+                  <excludes>
+                    <exclude>ai/onnxruntime/native/linux-*/**</exclude>
+                    <exclude>ai/onnxruntime/native/osx-*/**</exclude>
+                  </excludes>
+                </filter>
+                <!-- SQLite JDBC: 只保留 Windows 平台本地库 -->
+                <filter>
+                  <artifact>org.xerial:sqlite-jdbc</artifact>
+                  <excludes>
+                    <exclude>org/sqlite/native/Linux/**</exclude>
+                    <exclude>org/sqlite/native/Linux-Android/**</exclude>
+                    <exclude>org/sqlite/native/Linux-Musl/**</exclude>
+                    <exclude>org/sqlite/native/Mac/**</exclude>
+                    <exclude>org/sqlite/native/FreeBSD/**</exclude>
+                  </excludes>
+                </filter>
+                <!-- JNA: 只保留 Windows 平台本地库 -->
+                <filter>
+                  <artifact>net.java.dev.jna:jna</artifact>
+                  <excludes>
+                    <exclude>com/sun/jna/linux-*/**</exclude>
+                    <exclude>com/sun/jna/darwin*/**</exclude>
+                    <exclude>com/sun/jna/freebsd-*/**</exclude>
+                    <exclude>com/sun/jna/openbsd-*/**</exclude>
+                    <exclude>com/sun/jna/sunos-*/**</exclude>
+                    <exclude>com/sun/jna/aix-*/**</exclude>
+                  </excludes>
+                </filter>
+                <!-- 排除签名文件，避免安全异常 -->
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+              <!-- 生成的 jar 文件名后缀 -->
+              <shadedArtifactAttached>true</shadedArtifactAttached>
+              <shadedClassifierName>jar-with-dependencies</shadedClassifierName>
+            </configuration>
           </execution>
         </executions>
       </plugin>

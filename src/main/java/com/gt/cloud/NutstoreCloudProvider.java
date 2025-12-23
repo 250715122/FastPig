@@ -174,8 +174,7 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
     @Override
     public boolean upload(String remotePath, byte[] data) {
         if (!enabled) {
-            System.out.println("    ✗ 坚果云未启用，请检查 config.properties 配置");
-            logger.debug("[NutstoreProvider] 未启用，跳过上传");
+            logger.warn("[NutstoreProvider] 坚果云未启用，请检查 config.properties 配置");
             return false;
         }
 
@@ -197,17 +196,14 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
 
         } catch (com.github.sardine.impl.SardineException e) {
             // 只在出错时打印详细信息
-            System.out.println("\n    ✗ WebDAV 错误:");
-            System.out.println("      HTTP状态码: " + e.getStatusCode());
-            System.out.println("      错误消息: " + e.getMessage());
+            logger.error("[NutstoreProvider] WebDAV 错误: HTTP {} - {}", e.getStatusCode(), e.getMessage());
             if (e.getStatusCode() == 401) {
-                System.out.println("      提示: 请检查坚果云用户名和应用密码是否正确");
+                logger.error("[NutstoreProvider] 提示: 请检查坚果云用户名和应用密码是否正确");
             }
             logger.error("[NutstoreProvider] 上传失败: {}", e.getMessage(), e);
             return false;
         } catch (Exception e) {
-            System.out.println("\n    ✗ 异常: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("[NutstoreProvider] 上传异常: {}", e.getMessage(), e);
             logger.error("[NutstoreProvider] 上传失败: {}", e.getMessage(), e);
             return false;
         }
