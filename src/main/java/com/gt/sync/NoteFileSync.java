@@ -6,8 +6,9 @@ import com.gt.cloud.CloudStorageFactory;
 import com.gt.cloud.CloudStorageProvider;
 import com.gt.service.NoteService;
 import com.gt.storage.NoteFileStorage;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.gt.vector.VectorSearchManager;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -30,7 +31,7 @@ import java.util.stream.Stream;
  */
 public class NoteFileSync {
 
-    private static final Logger logger = LoggerFactory.getLogger(NoteFileSync.class);
+    private static final Logger logger = LogManager.getLogger(NoteFileSync.class);
     private static NoteFileSync instance;
 
     private final NoteFileStorage fileStorage;
@@ -395,6 +396,8 @@ public class NoteFileSync {
             AtomicInteger downloadedCount = new AtomicInteger(0);
             AtomicInteger failedCount = new AtomicInteger(0);
             AtomicInteger progressCount = new AtomicInteger(0);
+            // 用于线程安全地收集本次成功下载的任务（用于后续更新元数据/触发向量索引）
+            List<DownloadTask> completedTasks = Collections.synchronizedList(new ArrayList<>());
 
             if (totalToDownload > 0) {
                 updateStatus(statusCallback, "正在下载 0/" + totalToDownload + " 个文件...");
@@ -403,9 +406,6 @@ public class NoteFileSync {
                 int threadCount = Math.min(5, totalToDownload);
                 ExecutorService executor = Executors.newFixedThreadPool(threadCount);
                 List<Future<Boolean>> futures = new ArrayList<>();
-
-                // 用于线程安全地更新同步元数据
-                List<DownloadTask> completedTasks = Collections.synchronizedList(new ArrayList<>());
 
                 logger.info("[NoteFileSync] 启动 " + threadCount + " 线程并发下载...");
 
@@ -457,6 +457,30 @@ public class NoteFileSync {
                 updateStatus(statusCallback, "正在重建索引...");
                 logger.info("[NoteFileSync] 重建索引...");
                 noteService.rebuildIndexFromFiles();
+            }
+
+            // 增量触发向量索引：仅对本次成功下载的笔记进行索引（避免启动全量重建）
+            if (!completedTasks.isEmpty()) {
+                int triggered = 0;
+                for (DownloadTask task : completedTasks) {
+                    try {
+                        NoteDto note = fileStorage.loadFromFile(task.localFolder);
+                        if (note == null) {
+                            continue;
+                        }
+                        if (note.deleted) {
+                            continue;
+                        }
+                        String noteKey = (note.key != null && !note.key.isEmpty()) ? note.key : task.folderName;
+                        String noteDesc = (note.desc != null) ? note.desc : "";
+                        String content = (note.bodyMd != null) ? note.bodyMd : "";
+                        VectorSearchManager.getInstance().indexNote(noteKey, noteDesc, content);
+                        triggered++;
+                    } catch (Exception e) {
+                        logger.warn("[NoteFileSync] 触发向量索引失败: {} - {}", task.folderName, e.getMessage());
+                    }
+                }
+                logger.info("[NoteFileSync] 本次同步触发向量索引: {} 条", triggered);
             }
 
             // 更新同步时间并保存

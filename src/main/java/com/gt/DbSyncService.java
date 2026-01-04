@@ -2,8 +2,8 @@ package com.gt;
 
 import com.gt.sync.NoteFileSync;
 import com.gt.service.NoteService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -28,7 +28,7 @@ import java.util.function.Consumer;
  */
 public class DbSyncService {
 
-    private static final Logger logger = LoggerFactory.getLogger(DbSyncService.class);
+    private static final Logger logger = LogManager.getLogger(DbSyncService.class);
     private static volatile DbSyncService INSTANCE;
 
     public static DbSyncService getInstance() {
@@ -86,7 +86,7 @@ public class DbSyncService {
      * @param statusCallback 状态回调，用于更新 UI 状态栏
      */
     public boolean syncFromCloudOnStart(Consumer<String> statusCallback) {
-        logger.debug(">>> [DbSyncService] syncFromCloudOnStart() 被调用");
+        logger.info(">>> [DbSyncService] syncFromCloudOnStart() 被调用");
         
         if (useFileSync) {
             // 文件同步模式
@@ -104,8 +104,8 @@ public class DbSyncService {
      * - 整库模式：上传整个数据库
      */
     public boolean syncToCloud() {
-        logger.debug(">>> [DbSyncService] syncToCloud() 被调用");
-        logger.debug(">>> [DbSyncService] 使用文件同步: " + useFileSync);
+        logger.info(">>> [DbSyncService] syncToCloud() 被调用");
+        logger.info(">>> [DbSyncService] 使用文件同步: " + useFileSync);
         
         if (useFileSync) {
             // 文件同步模式
@@ -160,8 +160,8 @@ public class DbSyncService {
      * - 整库模式：下载整个数据库
      */
     public boolean syncFromCloud() {
-        logger.debug(">>> [DbSyncService] syncFromCloud() 被调用");
-        logger.debug(">>> [DbSyncService] 使用文件同步: " + useFileSync);
+        logger.info(">>> [DbSyncService] syncFromCloud() 被调用");
+        logger.info(">>> [DbSyncService] 使用文件同步: " + useFileSync);
         
         if (useFileSync) {
             // 文件同步模式

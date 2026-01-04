@@ -161,36 +161,36 @@ public class HotKeyManager {
         boolean ctrlPressed = (e.getModifiers() & NativeKeyEvent.CTRL_MASK) != 0;
         
         if (altPressed) {
-            logger.debug("检测到Alt组合键: Alt + {}", NativeKeyEvent.getKeyText(e.getKeyCode()));
+            logger.info("[热键] 检测到Alt组合键: Alt + {}", NativeKeyEvent.getKeyText(e.getKeyCode()));
             
             switch (e.getKeyCode()) {
                 case NativeKeyEvent.VC_N:
-                    logger.debug("执行Alt+N: 恢复窗口");
+                    logger.info("[热键] 执行Alt+N: 恢复窗口");
                     showWindowNormal();
                     break;
                 case NativeKeyEvent.VC_M:
-                    logger.debug("执行Alt+M: 最大化窗口");
+                    logger.info("[热键] 执行Alt+M: 最大化窗口");
                     showWindowMaximized();
                     break;
                 case NativeKeyEvent.VC_L:
-                    logger.debug("执行Alt+L: 最小化窗口");
+                    logger.info("[热键] 执行Alt+L: 最小化窗口");
                     minimizeWindow();
                     break;
                 case NativeKeyEvent.VC_Q:
-                    logger.debug("执行Alt+Q: 退出程序");
+                    logger.info("[热键] 执行Alt+Q: 退出程序");
                     exitApplication();
                     break;
                 case NativeKeyEvent.VC_S:
-                    logger.info("检测到 Alt+S 按键，开始上传");
+                    logger.info("[热键] 检测到 Alt+S 按键，开始上传");
                     syncToCloud();
                     break;
                 case NativeKeyEvent.VC_U:
-                    logger.info("检测到 Alt+U 按键，开始下载");
+                    logger.info("[热键] 检测到 Alt+U 按键，开始下载");
                     pullFromCloud();
                     break;
                 // Alt+P 不作为全局热键处理（预览仅在应用内快捷键生效）
                 default:
-                    logger.debug("未处理的Alt组合键: {}", NativeKeyEvent.getKeyText(e.getKeyCode()));
+                    logger.info("[热键] 未处理的Alt组合键: {}", NativeKeyEvent.getKeyText(e.getKeyCode()));
                     break;
             }
         }

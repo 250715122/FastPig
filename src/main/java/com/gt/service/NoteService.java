@@ -4,8 +4,8 @@ import com.gt.NoteDto;
 import com.gt.NoteRepository;
 import com.gt.storage.NoteFileStorage;
 import com.gt.vector.VectorSearchManager;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -28,7 +28,7 @@ import java.util.stream.Collectors;
  */
 public class NoteService {
 
-    private static final Logger logger = LoggerFactory.getLogger(NoteService.class);
+    private static final Logger logger = LogManager.getLogger(NoteService.class);
     private static NoteService instance;
 
     private final NoteRepository repository;

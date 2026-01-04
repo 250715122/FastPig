@@ -1,7 +1,7 @@
 package com.gt.sync;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class SyncMetadata {
 
-    private static final Logger logger = LoggerFactory.getLogger(SyncMetadata.class);
+    private static final Logger logger = LogManager.getLogger(SyncMetadata.class);
     public static final String META_FILE_NAME = ".sync_meta.json";
 
     private long lastSyncTime;

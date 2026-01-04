@@ -3,8 +3,8 @@ package com.gt.cloud;
 import com.github.sardine.DavResource;
 import com.github.sardine.Sardine;
 import com.github.sardine.SardineFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
@@ -24,7 +24,7 @@ import java.util.Properties;
  */
 public class NutstoreCloudProvider implements CloudStorageProvider {
 
-    private static final Logger logger = LoggerFactory.getLogger(NutstoreCloudProvider.class);
+    private static final Logger logger = LogManager.getLogger(NutstoreCloudProvider.class);
     private static NutstoreCloudProvider instance;
 
     private final boolean enabled;

@@ -111,7 +111,7 @@ call "%JPACKAGE%" ^
     --type app-image ^
     --dest . ^
     --icon target\FastPig.ico ^
-    --add-modules java.base,java.desktop,java.sql,java.logging,java.naming,java.xml,java.datatransfer,java.prefs,jdk.unsupported ^
+    --add-modules java.base,java.desktop,java.sql,java.logging,java.naming,java.xml,java.datatransfer,java.prefs,java.management,jdk.unsupported ^
     --jlink-options "--strip-debug --no-man-pages --no-header-files --compress=2" ^
     --verbose
 
