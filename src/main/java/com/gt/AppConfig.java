@@ -48,6 +48,7 @@ public class AppConfig {
     // 行为配置
     public static final String BEHAVIOR_SYNC_ON_START = "behavior.sync.on.start";
     public static final String BEHAVIOR_SYNC_ON_EXIT = "behavior.sync.on.exit";
+    public static final String SYNC_AUTO_UPLOAD_INTERVAL = "sync.auto.upload.interval"; // 分钟，0=禁用
     
     // ===== 默认值 =====
     
@@ -74,6 +75,7 @@ public class AppConfig {
         // 行为默认值
         DEFAULTS.setProperty(BEHAVIOR_SYNC_ON_START, "true");
         DEFAULTS.setProperty(BEHAVIOR_SYNC_ON_EXIT, "true");
+        DEFAULTS.setProperty(SYNC_AUTO_UPLOAD_INTERVAL, "30"); // 默认30分钟
     }
     
     private AppConfig() {

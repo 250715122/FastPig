@@ -1,7 +1,6 @@
 package com.gt;
 
 import javax.swing.*;
-import javax.swing.border.EmptyBorder;
 import java.awt.*;
 
 /**
@@ -19,6 +18,8 @@ public class CloudSyncPanel extends JPanel {
     private JTextField webdavBaseField;
     private JCheckBox syncOnStartCheckBox;
     private JCheckBox syncOnExitCheckBox;
+    private JCheckBox autoUploadCheckBox;
+    private JSpinner autoUploadIntervalSpinner;
     private JButton testConnectionButton;
     
     public CloudSyncPanel(SettingsDialog parent) {
@@ -125,6 +126,31 @@ public class CloudSyncPanel extends JPanel {
         syncOnExitCheckBox = UIComponents.createCheckBox("退出时自动同步");
         syncOnExitCheckBox.setAlignmentX(LEFT_ALIGNMENT);
         add(syncOnExitCheckBox);
+        add(Box.createVerticalStrut(15));
+
+        // 定时自动上传
+        add(createSection("定时自动上传", "按固定间隔自动将本地变更上传到云端"));
+        autoUploadCheckBox = UIComponents.createCheckBox("启用定时自动上传");
+        autoUploadCheckBox.setAlignmentX(LEFT_ALIGNMENT);
+        add(autoUploadCheckBox);
+        add(Box.createVerticalStrut(6));
+
+        JPanel intervalPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        intervalPanel.setOpaque(false);
+        intervalPanel.setAlignmentX(LEFT_ALIGNMENT);
+        intervalPanel.setMaximumSize(new Dimension(400, 35));
+        JLabel intervalLabel = new JLabel("上传间隔（分钟）：");
+        intervalLabel.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+        intervalLabel.setForeground(UIColors.TEXT_PRIMARY);
+        intervalPanel.add(intervalLabel);
+        autoUploadIntervalSpinner = new JSpinner(new SpinnerNumberModel(30, 5, 1440, 5));
+        autoUploadIntervalSpinner.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 13));
+        autoUploadIntervalSpinner.setPreferredSize(new Dimension(80, 28));
+        intervalPanel.add(autoUploadIntervalSpinner);
+        add(intervalPanel);
+
+        autoUploadCheckBox.addActionListener(e ->
+            autoUploadIntervalSpinner.setEnabled(autoUploadCheckBox.isSelected()));
         
         // 填充剩余空间
         add(Box.createVerticalGlue());
@@ -182,6 +208,11 @@ public class CloudSyncPanel extends JPanel {
         
         syncOnStartCheckBox.setSelected(config.getBoolean(AppConfig.BEHAVIOR_SYNC_ON_START, true));
         syncOnExitCheckBox.setSelected(config.getBoolean(AppConfig.BEHAVIOR_SYNC_ON_EXIT, true));
+        
+        int autoInterval = config.getInt(AppConfig.SYNC_AUTO_UPLOAD_INTERVAL, 30);
+        autoUploadCheckBox.setSelected(autoInterval > 0);
+        autoUploadIntervalSpinner.setValue(autoInterval > 0 ? autoInterval : 30);
+        autoUploadIntervalSpinner.setEnabled(autoInterval > 0);
     }
     
     public void saveConfig() {
@@ -201,6 +232,11 @@ public class CloudSyncPanel extends JPanel {
         
         config.setBoolean(AppConfig.BEHAVIOR_SYNC_ON_START, syncOnStartCheckBox.isSelected());
         config.setBoolean(AppConfig.BEHAVIOR_SYNC_ON_EXIT, syncOnExitCheckBox.isSelected());
+        
+        int autoInterval = autoUploadCheckBox.isSelected() ? (int) autoUploadIntervalSpinner.getValue() : 0;
+        config.setInt(AppConfig.SYNC_AUTO_UPLOAD_INTERVAL, autoInterval);
+        
+        AutoUploadScheduler.getInstance().restart();
     }
     
     public boolean validateConfig() {

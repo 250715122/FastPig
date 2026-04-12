@@ -48,8 +48,17 @@ backup_*/
 # 本地配置文件（保留 .example 模板）
 config.properties
 
+# 向量索引（运行时生成）
+vector_index/
+
 # 临时笔记目录
 notes/
+
+# 构建/运行临时输出
+build_output.txt
+run_output.txt
+run_jar_output.txt
+META-INF/
 
 # 临时测试脚本
 test*.bat

@@ -11,6 +11,7 @@ import com.melloware.jintellitype.JIntellitype;
 
 import javax.swing.JFrame;
 import javax.swing.JTextArea;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -30,6 +31,13 @@ public class HotKeyManager {
     private HotKeyMethod activeMethod = HotKeyMethod.NONE;
     private JFrame targetFrame;
     private JTextArea targetTextArea;
+    
+    // 同步防抖
+    private final AtomicBoolean syncInProgress = new AtomicBoolean(false);
+    private volatile long lastSyncFinishedAt = 0;
+    private final AtomicBoolean pullInProgress = new AtomicBoolean(false);
+    private volatile long lastPullFinishedAt = 0;
+    private static final long SYNC_COOLDOWN_MS = 3000; // 3秒冷却期
     
     // 热键标识
     private static final int HOTKEY_SHOW_NORMAL = 1;
@@ -226,8 +234,26 @@ public class HotKeyManager {
 
     /**
      * 同步数据库到云端（上传）
+     * 防抖：正在执行中或 3 秒冷却期内，直接跳过
      */
     private void syncToCloud() {
+        // 防重：正在执行中，直接跳过
+        if (!syncInProgress.compareAndSet(false, true)) {
+            logger.info("[上传] 已在执行中，跳过重复请求");
+            return;
+        }
+        
+        // 冷却期：距上次完成不到 3 秒，跳过
+        if (System.currentTimeMillis() - lastSyncFinishedAt < SYNC_COOLDOWN_MS) {
+            logger.info("[上传] 冷却期内，跳过");
+            syncInProgress.set(false);
+            UnifiedNoteAppFrame af = UnifiedNoteAppFrame.getActiveInstance();
+            if (af != null) {
+                af.updateStatusLeft("刚刚已上传，无需重复操作");
+            }
+            return;
+        }
+        
         logger.info("[上传] 开始执行");
         
         // 获取当前活动的编辑器窗口
@@ -262,13 +288,34 @@ public class HotKeyManager {
             if (activeFrame != null) {
                 activeFrame.updateStatusLeft("上传云端失败: " + ex.getMessage());
             }
+        } finally {
+            lastSyncFinishedAt = System.currentTimeMillis();
+            syncInProgress.set(false);
         }
     }
 
     /**
      * 从云端下载数据库（下载）
+     * 防抖：正在执行中或 3 秒冷却期内，直接跳过
      */
     private void pullFromCloud() {
+        // 防重：正在执行中，直接跳过
+        if (!pullInProgress.compareAndSet(false, true)) {
+            logger.info("[下载] 已在执行中，跳过重复请求");
+            return;
+        }
+        
+        // 冷却期：距上次完成不到 3 秒，跳过
+        if (System.currentTimeMillis() - lastPullFinishedAt < SYNC_COOLDOWN_MS) {
+            logger.info("[下载] 冷却期内，跳过");
+            pullInProgress.set(false);
+            UnifiedNoteAppFrame af = UnifiedNoteAppFrame.getActiveInstance();
+            if (af != null) {
+                af.updateStatusLeft("刚刚已下载，无需重复操作");
+            }
+            return;
+        }
+        
         logger.info("[下载] 开始执行");
         
         // 获取当前活动的编辑器窗口
@@ -310,6 +357,9 @@ public class HotKeyManager {
             if (activeFrame != null) {
                 activeFrame.updateStatusLeft("云端下载失败: " + ex.getMessage());
             }
+        } finally {
+            lastPullFinishedAt = System.currentTimeMillis();
+            pullInProgress.set(false);
         }
     }
 

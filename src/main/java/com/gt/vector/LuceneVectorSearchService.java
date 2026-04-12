@@ -113,20 +113,20 @@ public class LuceneVectorSearchService implements VectorSearchService {
             return;
         }
         
+        String docId = buildDocId(noteKey, h1Title);
+        
+        // 调试：打印索引内容
+        logger.debug("索引内容: noteKey={}, h1Title={}, content={}", noteKey, h1Title, content);
+        
+        // 生成向量（在锁外执行，不阻塞搜索）
+        float[] vector = embeddingService.embed(content);
+        if (vector == null) {
+            logger.error("向量生成失败: {}", docId);
+            return;
+        }
+        
         lock.writeLock().lock();
         try {
-            String docId = buildDocId(noteKey, h1Title);
-            
-            // 调试：打印索引内容
-            logger.debug("索引内容: noteKey={}, h1Title={}, content={}", noteKey, h1Title, content);
-            
-            // 生成向量
-            float[] vector = embeddingService.embed(content);
-            if (vector == null) {
-                logger.error("向量生成失败: {}", docId);
-                return;
-            }
-            
             // 先删除旧文档
             writer.deleteDocuments(new Term(FIELD_ID, docId));
             
@@ -156,50 +156,80 @@ public class LuceneVectorSearchService implements VectorSearchService {
     
     /**
      * 批量索引 H1 块（用于全量重建）
+     * 注意：embed 在锁外执行，不阻塞搜索
      */
     public void indexH1Batch(List<H1Block> blocks) {
         if (!available || blocks.isEmpty()) {
             return;
         }
         
+        // 在锁外批量生成向量
+        List<H1BlockWithVector> blocksWithVectors = new ArrayList<>();
+        for (H1Block block : blocks) {
+            float[] vector = embeddingService.embed(block.indexContent);
+            if (vector != null) {
+                blocksWithVectors.add(new H1BlockWithVector(
+                    block.noteKey, block.noteDesc, block.h1Title, block.indexContent, vector));
+            }
+        }
+        
+        if (blocksWithVectors.isEmpty()) {
+            return;
+        }
+        
+        // 在锁内批量写入
+        batchWriteWithVectors(null, blocksWithVectors);
+    }
+    
+    /**
+     * 批量写入已计算好向量的 H1 块
+     * 在锁内执行：先删除指定笔记的旧索引，再批量写入，最后统一 commit + refreshReader 一次
+     * 
+     * @param noteKeysToRemove 需要先删除旧索引的笔记 key 集合（可为 null）
+     * @param blocks 已计算好向量的 H1 块列表
+     */
+    public void batchWriteWithVectors(Set<String> noteKeysToRemove, List<H1BlockWithVector> blocks) {
+        if (!available || blocks.isEmpty()) {
+            return;
+        }
+        
         lock.writeLock().lock();
         try {
-            int count = 0;
-            for (H1Block block : blocks) {
-                String docId = buildDocId(block.noteKey, block.h1Title);
-                
-                // 生成向量
-                float[] vector = embeddingService.embed(block.indexContent);
-                if (vector == null) {
-                    continue;
+            // 先删除指定笔记的旧索引
+            if (noteKeysToRemove != null) {
+                for (String noteKey : noteKeysToRemove) {
+                    writer.deleteDocuments(new Term(FIELD_NOTE_KEY, noteKey));
                 }
-                
-                // 创建文档
+            }
+            
+            // 批量写入
+            int count = 0;
+            for (H1BlockWithVector block : blocks) {
                 Document doc = new Document();
-                doc.add(new StringField(FIELD_ID, docId, Field.Store.YES));
+                doc.add(new StringField(FIELD_ID, buildDocId(block.noteKey, block.h1Title), Field.Store.YES));
                 doc.add(new StringField(FIELD_NOTE_KEY, block.noteKey, Field.Store.YES));
                 doc.add(new StoredField(FIELD_NOTE_DESC, block.noteDesc != null ? block.noteDesc : ""));
                 doc.add(new StoredField(FIELD_H1_TITLE, block.h1Title));
                 doc.add(new StoredField(FIELD_CONTENT, truncate(block.indexContent, 200)));
-                doc.add(new KnnFloatVectorField(FIELD_VECTOR, vector, VectorSimilarityFunction.COSINE));
+                doc.add(new KnnFloatVectorField(FIELD_VECTOR, block.vector, VectorSimilarityFunction.COSINE));
                 
                 writer.addDocument(doc);
                 count++;
                 
-                // 每 100 条 commit 一次
+                // 每 100 条 commit 一次（减少内存压力）
                 if (count % 100 == 0) {
                     writer.commit();
-                    logger.debug("已索引 {} 条", count);
+                    logger.debug("已批量写入 {} 条", count);
                 }
             }
             
             writer.commit();
             refreshReader();
             
-            logger.info("批量索引完成，共 {} 条", count);
+            logger.info("批量索引写入完成，共 {} 条", count);
             
         } catch (Exception e) {
-            logger.error("批量索引失败: {}", e.getMessage(), e);
+            logger.error("批量索引写入失败: {}", e.getMessage(), e);
         } finally {
             lock.writeLock().unlock();
         }
@@ -221,6 +251,98 @@ public class LuceneVectorSearchService implements VectorSearchService {
             logger.debug("已移除笔记索引: {}", noteKey);
         } catch (Exception e) {
             logger.error("移除索引失败: {}", e.getMessage(), e);
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+    
+    /**
+     * 查询指定笔记已索引的所有 H1 标题
+     * 用于差量索引：保存时对比新旧标题集合，只对变化的块进行 embed + 写入
+     * 
+     * @param noteKey 笔记 key
+     * @return 已索引的 H1 标题集合（包含 __NOTE_NAME__ 等特殊标记）
+     */
+    public Set<String> getIndexedH1Titles(String noteKey) {
+        Set<String> titles = new HashSet<>();
+        if (!available || searcher == null) {
+            return titles;
+        }
+        
+        lock.readLock().lock();
+        try {
+            TermQuery query = new TermQuery(new Term(FIELD_NOTE_KEY, noteKey));
+            TopDocs topDocs = searcher.search(query, 1000); // 单个笔记最多 1000 个 H1
+            
+            for (ScoreDoc scoreDoc : topDocs.scoreDocs) {
+                Document doc = searcher.storedFields().document(scoreDoc.doc);
+                String h1Title = doc.get(FIELD_H1_TITLE);
+                if (h1Title != null) {
+                    titles.add(h1Title);
+                }
+            }
+        } catch (Exception e) {
+            logger.error("查询已索引 H1 失败: {}", e.getMessage(), e);
+        } finally {
+            lock.readLock().unlock();
+        }
+        
+        return titles;
+    }
+    
+    /**
+     * 差量更新笔记索引
+     * 在写锁内执行：按 docId 删除指定 H1 块，批量写入新块，单次 commit + refreshReader
+     * 
+     * @param noteKey 笔记 key（用于构建 docId）
+     * @param h1TitlesToRemove 需要删除的 H1 标题集合
+     * @param blocksToAdd 需要新增的已计算向量的块列表
+     */
+    public void differentialUpdate(String noteKey, Set<String> h1TitlesToRemove, List<H1BlockWithVector> blocksToAdd) {
+        if (!available) {
+            return;
+        }
+        
+        // 没有任何变更，跳过
+        if ((h1TitlesToRemove == null || h1TitlesToRemove.isEmpty()) 
+                && (blocksToAdd == null || blocksToAdd.isEmpty())) {
+            return;
+        }
+        
+        lock.writeLock().lock();
+        try {
+            // 删除指定的 H1 块（按 docId = noteKey#h1Title）
+            if (h1TitlesToRemove != null) {
+                for (String h1Title : h1TitlesToRemove) {
+                    String docId = buildDocId(noteKey, h1Title);
+                    writer.deleteDocuments(new Term(FIELD_ID, docId));
+                }
+            }
+            
+            // 写入新块
+            if (blocksToAdd != null) {
+                for (H1BlockWithVector block : blocksToAdd) {
+                    Document doc = new Document();
+                    doc.add(new StringField(FIELD_ID, buildDocId(block.noteKey, block.h1Title), Field.Store.YES));
+                    doc.add(new StringField(FIELD_NOTE_KEY, block.noteKey, Field.Store.YES));
+                    doc.add(new StoredField(FIELD_NOTE_DESC, block.noteDesc != null ? block.noteDesc : ""));
+                    doc.add(new StoredField(FIELD_H1_TITLE, block.h1Title));
+                    doc.add(new StoredField(FIELD_CONTENT, truncate(block.indexContent, 200)));
+                    doc.add(new KnnFloatVectorField(FIELD_VECTOR, block.vector, VectorSimilarityFunction.COSINE));
+                    
+                    writer.addDocument(doc);
+                }
+            }
+            
+            writer.commit();
+            refreshReader();
+            
+            int removedCount = (h1TitlesToRemove != null) ? h1TitlesToRemove.size() : 0;
+            int addedCount = (blocksToAdd != null) ? blocksToAdd.size() : 0;
+            logger.info("差量索引更新: noteKey={}, 删除={}, 新增={}", noteKey, removedCount, addedCount);
+            
+        } catch (Exception e) {
+            logger.error("差量索引更新失败: {}", e.getMessage(), e);
         } finally {
             lock.writeLock().unlock();
         }
@@ -494,6 +616,25 @@ public class LuceneVectorSearchService implements VectorSearchService {
             this.noteDesc = noteDesc;
             this.h1Title = h1Title;
             this.indexContent = indexContent;
+        }
+    }
+    
+    /**
+     * 已计算向量的 H1 块数据（用于批量写入）
+     */
+    public static class H1BlockWithVector {
+        public String noteKey;
+        public String noteDesc;
+        public String h1Title;
+        public String indexContent;
+        public float[] vector;
+        
+        public H1BlockWithVector(String noteKey, String noteDesc, String h1Title, String indexContent, float[] vector) {
+            this.noteKey = noteKey;
+            this.noteDesc = noteDesc;
+            this.h1Title = h1Title;
+            this.indexContent = indexContent;
+            this.vector = vector;
         }
     }
     

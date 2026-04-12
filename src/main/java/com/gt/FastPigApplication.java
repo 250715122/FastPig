@@ -85,6 +85,8 @@ public class FastPigApplication extends JFrame {
                 logger.error("[FastPigApplication] 后台同步失败: {}", e.getMessage(), e);
                 UnifiedNoteAppFrame.updateStartupStatus("同步失败");
             }
+            // 启动定时自动上传（在首次同步完成后）
+            AutoUploadScheduler.getInstance().start();
         }, "CloudSync-Thread").start();
         // 同时初始化热键（Alt+S 可再次呼出界面）
         final FastPigApplication app = new FastPigApplication();
