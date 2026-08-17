@@ -148,7 +148,17 @@ public class NoteFileStorage {
         try {
             // 1. 提取正文中引用的图片文件名
             Set<String> referencedFiles = new HashSet<>();
-            if (note.bodyMd != null && !note.bodyMd.isEmpty()) {
+            if (note.encrypted) {
+                // 加密笔记的正文是密文，正则扫不出任何引用。
+                // 必须改用 front matter 里的明文清单，否则这里会把图片全删光。
+                if (note.assets != null) {
+                    referencedFiles.addAll(note.assets);
+                } else {
+                    // 清单缺失时宁可不删，也不能误删用户的图片
+                    logger.info("[NoteFileStorage] 加密笔记缺少 assets 清单，跳过图片清理: " + note.key);
+                    return;
+                }
+            } else if (note.bodyMd != null && !note.bodyMd.isEmpty()) {
                 Matcher matcher = ASSET_REF_PATTERN.matcher(note.bodyMd);
                 while (matcher.find()) {
                     referencedFiles.add(matcher.group(1));
@@ -356,6 +366,31 @@ public class NoteFileStorage {
         sb.append("deleted: ").append(note.deleted ? "true" : "false").append("\n");
         sb.append("createdAt: ").append(formatTimestamp(note.createdAt)).append("\n");
         sb.append("updatedAt: ").append(formatTimestamp(note.updatedAt)).append("\n");
+
+        // 私密笔记的加密参数。这些值不是机密，必须明文写入：
+        // 云同步的 version/deleted 判定直接对 note.md 原文做字符串查找。
+        if (note.encrypted) {
+            sb.append("encrypted: true\n");
+            appendIfPresent(sb, "cipherIv", note.cipherIv);
+            appendIfPresent(sb, "pwdSalt", note.pwdSalt);
+            appendIfPresent(sb, "pwdIv", note.pwdIv);
+            appendIfPresent(sb, "pwdWrappedDek", note.pwdWrappedDek);
+            appendIfPresent(sb, "masterSalt", note.masterSalt);
+            appendIfPresent(sb, "masterIv", note.masterIv);
+            appendIfPresent(sb, "masterWrappedDek", note.masterWrappedDek);
+
+            // 图片引用清单必须明文保留，否则正文加密后 cleanupUnusedAssets
+            // 扫不到任何引用，会把 assets 下的图片全部删掉
+            sb.append("assets: [");
+            if (note.assets != null && !note.assets.isEmpty()) {
+                for (int i = 0; i < note.assets.size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append("\"").append(escapeYaml(note.assets.get(i))).append("\"");
+                }
+            }
+            sb.append("]\n");
+        }
+
         sb.append("---\n\n");
 
         // 正文
@@ -364,6 +399,12 @@ public class NoteFileStorage {
         }
 
         return sb.toString();
+    }
+
+    private void appendIfPresent(StringBuilder sb, String key, String value) {
+        if (value != null && !value.isEmpty()) {
+            sb.append(key).append(": ").append(value).append("\n");
+        }
     }
 
     /**
@@ -431,6 +472,20 @@ public class NoteFileStorage {
         // 解析 tags 数组
         String tagsStr = values.get("tags");
         note.tags = parseTags(tagsStr);
+
+        // 私密笔记的加密参数。解析器对缺失字段宽容，旧版本笔记读取不受影响。
+        note.encrypted = "true".equalsIgnoreCase(values.get("encrypted"));
+        if (note.encrypted) {
+            note.cipherIv = values.get("cipherIv");
+            note.pwdSalt = values.get("pwdSalt");
+            note.pwdIv = values.get("pwdIv");
+            note.pwdWrappedDek = values.get("pwdWrappedDek");
+            note.masterSalt = values.get("masterSalt");
+            note.masterIv = values.get("masterIv");
+            note.masterWrappedDek = values.get("masterWrappedDek");
+            note.assets = parseTags(values.get("assets"));
+            note.locked = true; // 从磁盘读出来时一律是锁定态，待解锁后才有明文
+        }
     }
 
     /**

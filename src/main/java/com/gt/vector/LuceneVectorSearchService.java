@@ -31,6 +31,18 @@ public class LuceneVectorSearchService implements VectorSearchService {
     private static final int HNSW_MAX_CONN = 16;  // HNSW M 参数
     private static final int HNSW_BEAM_WIDTH = 100;  // HNSW efConstruction
     
+    /**
+     * 索引结构版本。docId 格式变化或字段增减时必须递增，
+     * 否则旧索引里的文档匹配不上新的 docId，差量比对会全部落空。
+     * 版本 2：docId 加入同名序号，新增 blockHash 字段，正文参与 embedding。
+     */
+    private static final int SCHEMA_VERSION = 2;
+    private static final String SCHEMA_FILE = ".schema_version";
+    
+    // 搜索结果多样性：每篇笔记最多占用的条数，以及为此需要的超取倍率
+    private static final int PER_NOTE_QUOTA = 3;
+    private static final int OVERFETCH_FACTOR = 4;
+    
     // 字段名
     private static final String FIELD_ID = "id";
     private static final String FIELD_NOTE_KEY = "noteKey";
@@ -38,12 +50,17 @@ public class LuceneVectorSearchService implements VectorSearchService {
     private static final String FIELD_H1_TITLE = "h1Title";
     private static final String FIELD_CONTENT = "content";
     private static final String FIELD_VECTOR = "vector";
+    private static final String FIELD_BLOCK_HASH = "blockHash";
     
     private final EmbeddingService embeddingService;
     private Directory directory;
+    private Path indexPath;
     private IndexWriter writer;
     private DirectoryReader reader;
-    private IndexSearcher searcher;
+    // searcher 会在 refreshReader 中整体替换。搜索时要在读锁内取快照后再出锁做推理，
+    // 因此这里必须是 volatile，保证跨线程可见。
+    private volatile IndexSearcher searcher;
+    private boolean schemaOutdated = false;
     
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private boolean available = false;
@@ -74,8 +91,10 @@ public class LuceneVectorSearchService implements VectorSearchService {
             }
             
             // 创建索引目录
-            Path indexPath = Paths.get(System.getProperty("user.dir"), INDEX_DIR);
+            indexPath = Paths.get(System.getProperty("user.dir"), INDEX_DIR);
             Files.createDirectories(indexPath);
+            
+            schemaOutdated = !isSchemaCurrent();
             
             // 打开 Lucene 目录
             directory = FSDirectory.open(indexPath);
@@ -93,10 +112,44 @@ public class LuceneVectorSearchService implements VectorSearchService {
             available = true;
             logger.info("索引初始化完成，索引目录: {}", indexPath);
             logger.info("当前索引数量: {}", getIndexedCount());
+            if (schemaOutdated) {
+                logger.info("索引结构版本低于 {}，需要一次全量重建", SCHEMA_VERSION);
+            }
             
         } catch (Exception e) {
             errorMessage = "索引初始化失败: " + e.getMessage();
             logger.error(errorMessage, e);
+        }
+    }
+    
+    /**
+     * 索引结构是否已过期，需要全量重建
+     */
+    public boolean isSchemaOutdated() {
+        return schemaOutdated;
+    }
+    
+    /**
+     * 全量重建完成后调用，落盘当前结构版本
+     */
+    public void markSchemaCurrent() {
+        try {
+            if (indexPath != null) {
+                Files.writeString(indexPath.resolve(SCHEMA_FILE), String.valueOf(SCHEMA_VERSION));
+            }
+            schemaOutdated = false;
+        } catch (Exception e) {
+            logger.error("写入索引结构版本失败: {}", e.getMessage(), e);
+        }
+    }
+    
+    private boolean isSchemaCurrent() {
+        try {
+            Path marker = indexPath.resolve(SCHEMA_FILE);
+            if (!Files.exists(marker)) return false;
+            return SCHEMA_VERSION == Integer.parseInt(Files.readString(marker).trim());
+        } catch (Exception e) {
+            return false;
         }
     }
     
@@ -113,7 +166,7 @@ public class LuceneVectorSearchService implements VectorSearchService {
             return;
         }
         
-        String docId = buildDocId(noteKey, h1Title);
+        String docId = buildDocId(noteKey, h1Title, 0);
         
         // 调试：打印索引内容
         logger.debug("索引内容: noteKey={}, h1Title={}, content={}", noteKey, h1Title, content);
@@ -127,19 +180,10 @@ public class LuceneVectorSearchService implements VectorSearchService {
         
         lock.writeLock().lock();
         try {
-            // 先删除旧文档
-            writer.deleteDocuments(new Term(FIELD_ID, docId));
-            
-            // 创建新文档
-            Document doc = new Document();
-            doc.add(new StringField(FIELD_ID, docId, Field.Store.YES));
-            doc.add(new StringField(FIELD_NOTE_KEY, noteKey, Field.Store.YES));
-            doc.add(new StoredField(FIELD_NOTE_DESC, noteDesc != null ? noteDesc : ""));
-            doc.add(new StoredField(FIELD_H1_TITLE, h1Title));
-            doc.add(new StoredField(FIELD_CONTENT, truncate(content, 200))); // 存储截断后的内容用于显示
-            doc.add(new KnnFloatVectorField(FIELD_VECTOR, vector, VectorSimilarityFunction.COSINE));
-            
-            writer.addDocument(doc);
+            // updateDocument 等价于按 id 先删后加，且是原子的，避免重复文档累积
+            Document doc = buildDocument(docId, noteKey, noteDesc, h1Title, content,
+                                         NoteH1Parser.hashContent(content), vector);
+            writer.updateDocument(new Term(FIELD_ID, docId), doc);
             writer.commit();
             
             // 刷新 reader
@@ -169,7 +213,8 @@ public class LuceneVectorSearchService implements VectorSearchService {
             float[] vector = embeddingService.embed(block.indexContent);
             if (vector != null) {
                 blocksWithVectors.add(new H1BlockWithVector(
-                    block.noteKey, block.noteDesc, block.h1Title, block.indexContent, vector));
+                    block.noteKey, block.noteDesc, block.h1Title, block.indexContent,
+                    0, NoteH1Parser.hashContent(block.indexContent), vector));
             }
         }
         
@@ -205,15 +250,10 @@ public class LuceneVectorSearchService implements VectorSearchService {
             // 批量写入
             int count = 0;
             for (H1BlockWithVector block : blocks) {
-                Document doc = new Document();
-                doc.add(new StringField(FIELD_ID, buildDocId(block.noteKey, block.h1Title), Field.Store.YES));
-                doc.add(new StringField(FIELD_NOTE_KEY, block.noteKey, Field.Store.YES));
-                doc.add(new StoredField(FIELD_NOTE_DESC, block.noteDesc != null ? block.noteDesc : ""));
-                doc.add(new StoredField(FIELD_H1_TITLE, block.h1Title));
-                doc.add(new StoredField(FIELD_CONTENT, truncate(block.indexContent, 200)));
-                doc.add(new KnnFloatVectorField(FIELD_VECTOR, block.vector, VectorSimilarityFunction.COSINE));
-                
-                writer.addDocument(doc);
+                String docId = buildDocId(block.noteKey, block.h1Title, block.dupIndex);
+                Document doc = buildDocument(docId, block.noteKey, block.noteDesc, block.h1Title,
+                                             block.indexContent, block.blockHash, block.vector);
+                writer.updateDocument(new Term(FIELD_ID, docId), doc);
                 count++;
                 
                 // 每 100 条 commit 一次（减少内存压力）
@@ -257,89 +297,108 @@ public class LuceneVectorSearchService implements VectorSearchService {
     }
     
     /**
-     * 查询指定笔记已索引的所有 H1 标题
-     * 用于差量索引：保存时对比新旧标题集合，只对变化的块进行 embed + 写入
-     * 
+     * 查询指定笔记已索引的全部块，返回 docId 到 blockHash 的映射。
+     * 保存时用它逐块比对哈希，只对内容真正变化的块重新 embed。
+     *
+     * 用 Collector 收集全部命中，不再有"单篇最多 1000 个 H1"的上限。
+     *
      * @param noteKey 笔记 key
-     * @return 已索引的 H1 标题集合（包含 __NOTE_NAME__ 等特殊标记）
+     * @return docId -> blockHash
      */
-    public Set<String> getIndexedH1Titles(String noteKey) {
-        Set<String> titles = new HashSet<>();
-        if (!available || searcher == null) {
-            return titles;
+    public Map<String, String> getIndexedBlocks(String noteKey) {
+        Map<String, String> blocks = new HashMap<>();
+        if (!available) {
+            return blocks;
         }
         
         lock.readLock().lock();
         try {
-            TermQuery query = new TermQuery(new Term(FIELD_NOTE_KEY, noteKey));
-            TopDocs topDocs = searcher.search(query, 1000); // 单个笔记最多 1000 个 H1
+            // searcher 必须在读锁内取：refreshReader 会关掉旧 reader，
+            // 在锁外取到的引用可能在使用时已经失效
+            IndexSearcher s = searcher;
+            if (s == null) {
+                return blocks;
+            }
             
-            for (ScoreDoc scoreDoc : topDocs.scoreDocs) {
-                Document doc = searcher.storedFields().document(scoreDoc.doc);
-                String h1Title = doc.get(FIELD_H1_TITLE);
-                if (h1Title != null) {
-                    titles.add(h1Title);
+            List<Integer> docIds = new ArrayList<>();
+            s.search(new TermQuery(new Term(FIELD_NOTE_KEY, noteKey)), new SimpleCollector() {
+                private int docBase;
+                
+                @Override
+                protected void doSetNextReader(LeafReaderContext context) {
+                    this.docBase = context.docBase;
+                }
+                
+                @Override
+                public void collect(int doc) {
+                    docIds.add(docBase + doc);
+                }
+                
+                @Override
+                public ScoreMode scoreMode() {
+                    return ScoreMode.COMPLETE_NO_SCORES;
+                }
+            });
+            
+            StoredFields storedFields = s.storedFields();
+            for (int docId : docIds) {
+                Document doc = storedFields.document(docId);
+                String id = doc.get(FIELD_ID);
+                if (id != null) {
+                    blocks.put(id, doc.get(FIELD_BLOCK_HASH));
                 }
             }
         } catch (Exception e) {
-            logger.error("查询已索引 H1 失败: {}", e.getMessage(), e);
+            logger.error("查询已索引块失败: {}", e.getMessage(), e);
         } finally {
             lock.readLock().unlock();
         }
         
-        return titles;
+        return blocks;
     }
     
     /**
      * 差量更新笔记索引
-     * 在写锁内执行：按 docId 删除指定 H1 块，批量写入新块，单次 commit + refreshReader
+     * 在写锁内执行：按 docId 删除消失的块，按 docId 覆盖写入变化的块，单次 commit + refreshReader
      * 
-     * @param noteKey 笔记 key（用于构建 docId）
-     * @param h1TitlesToRemove 需要删除的 H1 标题集合
-     * @param blocksToAdd 需要新增的已计算向量的块列表
+     * @param noteKey 笔记 key（仅用于日志）
+     * @param docIdsToRemove 需要删除的 docId 集合
+     * @param blocksToWrite 需要写入的已计算向量的块列表
      */
-    public void differentialUpdate(String noteKey, Set<String> h1TitlesToRemove, List<H1BlockWithVector> blocksToAdd) {
+    public void differentialUpdate(String noteKey, Set<String> docIdsToRemove, List<H1BlockWithVector> blocksToWrite) {
         if (!available) {
             return;
         }
         
         // 没有任何变更，跳过
-        if ((h1TitlesToRemove == null || h1TitlesToRemove.isEmpty()) 
-                && (blocksToAdd == null || blocksToAdd.isEmpty())) {
+        if ((docIdsToRemove == null || docIdsToRemove.isEmpty()) 
+                && (blocksToWrite == null || blocksToWrite.isEmpty())) {
             return;
         }
         
         lock.writeLock().lock();
         try {
-            // 删除指定的 H1 块（按 docId = noteKey#h1Title）
-            if (h1TitlesToRemove != null) {
-                for (String h1Title : h1TitlesToRemove) {
-                    String docId = buildDocId(noteKey, h1Title);
+            if (docIdsToRemove != null) {
+                for (String docId : docIdsToRemove) {
                     writer.deleteDocuments(new Term(FIELD_ID, docId));
                 }
             }
             
-            // 写入新块
-            if (blocksToAdd != null) {
-                for (H1BlockWithVector block : blocksToAdd) {
-                    Document doc = new Document();
-                    doc.add(new StringField(FIELD_ID, buildDocId(block.noteKey, block.h1Title), Field.Store.YES));
-                    doc.add(new StringField(FIELD_NOTE_KEY, block.noteKey, Field.Store.YES));
-                    doc.add(new StoredField(FIELD_NOTE_DESC, block.noteDesc != null ? block.noteDesc : ""));
-                    doc.add(new StoredField(FIELD_H1_TITLE, block.h1Title));
-                    doc.add(new StoredField(FIELD_CONTENT, truncate(block.indexContent, 200)));
-                    doc.add(new KnnFloatVectorField(FIELD_VECTOR, block.vector, VectorSimilarityFunction.COSINE));
-                    
-                    writer.addDocument(doc);
+            if (blocksToWrite != null) {
+                for (H1BlockWithVector block : blocksToWrite) {
+                    String docId = buildDocId(block.noteKey, block.h1Title, block.dupIndex);
+                    Document doc = buildDocument(docId, block.noteKey, block.noteDesc, block.h1Title,
+                                                 block.indexContent, block.blockHash, block.vector);
+                    writer.updateDocument(new Term(FIELD_ID, docId), doc);
                 }
             }
             
             writer.commit();
             refreshReader();
             
-            int removedCount = (h1TitlesToRemove != null) ? h1TitlesToRemove.size() : 0;
-            int addedCount = (blocksToAdd != null) ? blocksToAdd.size() : 0;
-            logger.info("差量索引更新: noteKey={}, 删除={}, 新增={}", noteKey, removedCount, addedCount);
+            int removedCount = (docIdsToRemove != null) ? docIdsToRemove.size() : 0;
+            int writtenCount = (blocksToWrite != null) ? blocksToWrite.size() : 0;
+            logger.info("差量索引更新: noteKey={}, 删除={}, 写入={}", noteKey, removedCount, writtenCount);
             
         } catch (Exception e) {
             logger.error("差量索引更新失败: {}", e.getMessage(), e);
@@ -355,33 +414,41 @@ public class LuceneVectorSearchService implements VectorSearchService {
      * @return 搜索结果列表（包含 noteKey、h1Title、score、keywordScore、totalScore）
      */
     public List<VectorSearchResult> search(String query, int topK) {
-        List<VectorSearchResult> results = new ArrayList<>();
+        List<VectorSearchResult> candidates = new ArrayList<>();
         
-        if (!available || searcher == null) {
-            return results;
+        if (!available) {
+            return candidates;
         }
+        
+        logger.debug("搜索查询: {}", query);
+        
+        // ONNX 推理耗时可观，放在读锁内会和索引写入互相拖累。
+        // 推理本身不需要 searcher，所以先在锁外算好向量，进锁后再取 searcher。
+        float[] queryVector = embeddingService.embed(query);
+        if (queryVector == null) {
+            logger.error("查询向量生成失败");
+            return candidates;
+        }
+        
+        // 超取：后面要按笔记配额筛选，不多取就没有多样性可挑
+        int fetchK = topK * OVERFETCH_FACTOR;
         
         lock.readLock().lock();
         try {
-            // 调试：打印查询内容和索引数量
-            logger.debug("搜索查询: {}", query);
-            logger.debug("当前索引数量: {}", getIndexedCount());
-            
-            // 查询文本转向量
-            float[] queryVector = embeddingService.embed(query);
-            if (queryVector == null) {
-                logger.error("查询向量生成失败");
-                return results;
+            // searcher 必须在读锁内取：refreshReader 会关掉旧 reader
+            IndexSearcher s = searcher;
+            if (s == null) {
+                return candidates;
             }
             
-            // KNN 查询
-            KnnFloatVectorQuery knnQuery = new KnnFloatVectorQuery(FIELD_VECTOR, queryVector, topK);
-            TopDocs topDocs = searcher.search(knnQuery, topK);
+            KnnFloatVectorQuery knnQuery = new KnnFloatVectorQuery(FIELD_VECTOR, queryVector, fetchK);
+            TopDocs topDocs = s.search(knnQuery, fetchK);
             
-            logger.debug("搜索结果数: {}", topDocs.scoreDocs.length);
+            logger.debug("KNN 候选数: {}", topDocs.scoreDocs.length);
             
+            StoredFields storedFields = s.storedFields();
             for (ScoreDoc scoreDoc : topDocs.scoreDocs) {
-                Document doc = searcher.storedFields().document(scoreDoc.doc);
+                Document doc = storedFields.document(scoreDoc.doc);
                 
                 VectorSearchResult result = new VectorSearchResult();
                 result.noteKey = doc.get(FIELD_NOTE_KEY);
@@ -396,26 +463,49 @@ public class LuceneVectorSearchService implements VectorSearchService {
                 result.keywordScore = calculateKeywordScore(query, matchContent);
                 result.totalScore = result.score + result.keywordScore;
                 
-                // 调试：打印每个结果
-                logger.debug("结果: noteKey={}, h1Title={}, V={}, K={}, T={}", 
-                    result.noteKey, result.h1Title, 
-                    String.format("%.2f", result.score),
-                    String.format("%.2f", result.keywordScore),
-                    String.format("%.2f", result.totalScore));
-                
-                results.add(result);
+                candidates.add(result);
             }
-            
-            // 按 totalScore 降序排序
-            results.sort((a, b) -> Float.compare(b.totalScore, a.totalScore));
             
         } catch (Exception e) {
             logger.error("搜索失败: {}", e.getMessage(), e);
+            return candidates;
         } finally {
             lock.readLock().unlock();
         }
         
-        return results;
+        candidates.sort((a, b) -> Float.compare(b.totalScore, a.totalScore));
+        return applyPerNoteQuota(candidates, topK);
+    }
+    
+    /**
+     * 按笔记配额裁剪结果，避免一篇有上百个 H1 的笔记占满整个结果列表。
+     *
+     * 先按每篇最多 PER_NOTE_QUOTA 条挑选，若不足 topK 再用剩下的候选按分数回填 ——
+     * 回填这步不能少，否则当查询只命中单篇笔记时结果会从 topK 锐减到 3 条，比不做配额还差。
+     */
+    private List<VectorSearchResult> applyPerNoteQuota(List<VectorSearchResult> candidates, int topK) {
+        List<VectorSearchResult> picked = new ArrayList<>();
+        List<VectorSearchResult> overflow = new ArrayList<>();
+        Map<String, Integer> perNote = new HashMap<>();
+        
+        for (VectorSearchResult r : candidates) {
+            String key = r.noteKey != null ? r.noteKey : "";
+            int used = perNote.getOrDefault(key, 0);
+            if (used < PER_NOTE_QUOTA && picked.size() < topK) {
+                picked.add(r);
+                perNote.put(key, used + 1);
+            } else {
+                overflow.add(r);
+            }
+        }
+        
+        for (VectorSearchResult r : overflow) {
+            if (picked.size() >= topK) break;
+            picked.add(r);
+        }
+        
+        picked.sort((a, b) -> Float.compare(b.totalScore, a.totalScore));
+        return picked;
     }
     
     /**
@@ -588,8 +678,34 @@ public class LuceneVectorSearchService implements VectorSearchService {
         searcher = new IndexSearcher(reader);
     }
     
-    private String buildDocId(String noteKey, String h1Title) {
-        return noteKey + "#" + h1Title;
+    /**
+     * 构建块的稳定标识。
+     *
+     * 加入同名序号 dupIndex 而不是全局序号：同一篇笔记里允许出现重名 H1，
+     * 只用 noteKey#title 会让它们互相覆盖；而用全局序号则在中间插入一个块时
+     * 后面所有块的 id 都会位移，导致整篇重新 embed。
+     */
+    private String buildDocId(String noteKey, String h1Title, int dupIndex) {
+        return noteKey + "#" + h1Title + "#" + dupIndex;
+    }
+    
+    /** 供差量比对方构造新块 docId，必须与写入侧口径一致 */
+    public String docIdOf(String noteKey, String h1Title, int dupIndex) {
+        return buildDocId(noteKey, h1Title, dupIndex);
+    }
+    
+    private Document buildDocument(String docId, String noteKey, String noteDesc,
+                                   String h1Title, String indexContent,
+                                   String blockHash, float[] vector) {
+        Document doc = new Document();
+        doc.add(new StringField(FIELD_ID, docId, Field.Store.YES));
+        doc.add(new StringField(FIELD_NOTE_KEY, noteKey, Field.Store.YES));
+        doc.add(new StoredField(FIELD_NOTE_DESC, noteDesc != null ? noteDesc : ""));
+        doc.add(new StoredField(FIELD_H1_TITLE, h1Title));
+        doc.add(new StoredField(FIELD_CONTENT, truncate(indexContent, 200)));
+        doc.add(new StringField(FIELD_BLOCK_HASH, blockHash != null ? blockHash : "", Field.Store.YES));
+        doc.add(new KnnFloatVectorField(FIELD_VECTOR, vector, VectorSimilarityFunction.COSINE));
+        return doc;
     }
     
     private String truncate(String text, int maxLen) {
@@ -627,13 +743,18 @@ public class LuceneVectorSearchService implements VectorSearchService {
         public String noteDesc;
         public String h1Title;
         public String indexContent;
+        public int dupIndex;
+        public String blockHash;
         public float[] vector;
         
-        public H1BlockWithVector(String noteKey, String noteDesc, String h1Title, String indexContent, float[] vector) {
+        public H1BlockWithVector(String noteKey, String noteDesc, String h1Title, String indexContent,
+                                 int dupIndex, String blockHash, float[] vector) {
             this.noteKey = noteKey;
             this.noteDesc = noteDesc;
             this.h1Title = h1Title;
             this.indexContent = indexContent;
+            this.dupIndex = dupIndex;
+            this.blockHash = blockHash;
             this.vector = vector;
         }
     }

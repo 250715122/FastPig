@@ -49,6 +49,11 @@ public class AppConfig {
     public static final String BEHAVIOR_SYNC_ON_START = "behavior.sync.on.start";
     public static final String BEHAVIOR_SYNC_ON_EXIT = "behavior.sync.on.exit";
     public static final String SYNC_AUTO_UPLOAD_INTERVAL = "sync.auto.upload.interval"; // 分钟，0=禁用
+
+    // 私密笔记主密码。这里只存 PBKDF2 派生出的校验值与盐，绝不存明文，
+    // 也不能复用 setEncryptedPassword —— 那个只是 Base64 编码，可逆。
+    public static final String MASTER_PASSWORD_SALT = "security.master.salt";
+    public static final String MASTER_PASSWORD_VERIFIER = "security.master.verifier";
     
     // ===== 默认值 =====
     
@@ -289,6 +294,40 @@ public class AppConfig {
             // 新格式：b64: 前缀，避免与明文混淆
             String encoded = Base64.getEncoder().encodeToString(password.getBytes(StandardCharsets.UTF_8));
             properties.setProperty(key, B64_PREFIX + encoded);
+        }
+    }
+
+    // ===== 私密笔记主密码 =====
+
+    /** 是否已设置主密码。未设置时不允许把笔记加密，否则忘记密码就无法恢复。 */
+    public boolean isMasterPasswordSet() {
+        String salt = properties.getProperty(MASTER_PASSWORD_SALT);
+        String verifier = properties.getProperty(MASTER_PASSWORD_VERIFIER);
+        return salt != null && !salt.isEmpty() && verifier != null && !verifier.isEmpty();
+    }
+
+    /**
+     * 设置主密码。只保存 PBKDF2 派生值与盐，无法从中还原出密码本身；
+     * 这个值仅用于校验输入是否正确，真正的密钥是在需要时现场派生的。
+     */
+    public void setMasterPassword(char[] password) throws Exception {
+        byte[] salt = com.gt.crypto.NoteCrypto.randomBytes(16);
+        String verifier = com.gt.crypto.NoteCrypto.deriveVerifier(password, salt);
+        properties.setProperty(MASTER_PASSWORD_SALT, com.gt.crypto.NoteCrypto.b64(salt));
+        properties.setProperty(MASTER_PASSWORD_VERIFIER, verifier);
+    }
+
+    public boolean verifyMasterPassword(char[] password) {
+        if (!isMasterPasswordSet()) {
+            return false;
+        }
+        try {
+            byte[] salt = com.gt.crypto.NoteCrypto.unb64(properties.getProperty(MASTER_PASSWORD_SALT));
+            String actual = com.gt.crypto.NoteCrypto.deriveVerifier(password, salt);
+            return com.gt.crypto.NoteCrypto.verifierMatches(
+                    properties.getProperty(MASTER_PASSWORD_VERIFIER), actual);
+        } catch (Exception e) {
+            return false;
         }
     }
 

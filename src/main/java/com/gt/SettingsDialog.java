@@ -17,13 +17,14 @@ public class SettingsDialog extends JDialog {
     private final JPanel contentPanel;
     
     // 左侧导航列表
-    private final String[] categories = {"云同步", "编辑器", "界面", "快捷键", "关于"};
+    private final String[] categories = {"云同步", "编辑器", "界面", "安全", "快捷键", "关于"};
     private JList<String> categoryList;
     
     // 配置面板
     private CloudSyncPanel cloudSyncPanel;
     private EditorPanel editorPanel;
     private UIPanel uiPanel;
+    private SecurityPanel securityPanel;
     private ShortcutsPanel shortcutsPanel;
     private AboutPanel aboutPanel;
     
@@ -102,8 +103,9 @@ public class SettingsDialog extends JDialog {
                     case 0 -> "☁";
                     case 1 -> "✏";
                     case 2 -> "🎨";
-                    case 3 -> "⌨";
-                    case 4 -> "ℹ";
+                    case 3 -> "🔒";
+                    case 4 -> "⌨";
+                    case 5 -> "ℹ";
                     default -> "";
                 };
                 label.setText(" " + icon + "  " + value);
@@ -116,6 +118,7 @@ public class SettingsDialog extends JDialog {
         cloudSyncPanel = new CloudSyncPanel(this);
         editorPanel = new EditorPanel(this);
         uiPanel = new UIPanel(this);
+        securityPanel = new SecurityPanel(this);
         shortcutsPanel = new ShortcutsPanel(this);
         aboutPanel = new AboutPanel(this);
         
@@ -123,6 +126,7 @@ public class SettingsDialog extends JDialog {
         contentPanel.add(cloudSyncPanel, "云同步");
         contentPanel.add(editorPanel, "编辑器");
         contentPanel.add(uiPanel, "界面");
+        contentPanel.add(securityPanel, "安全");
         contentPanel.add(shortcutsPanel, "快捷键");
         contentPanel.add(aboutPanel, "关于");
         

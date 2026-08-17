@@ -62,6 +62,7 @@ public class UnifiedNoteAppFrame extends JFrame {
      */
     private class LineNumberComponent extends JComponent {
         private static final int PADDING = 8; // 行号与边界的间距
+        private int lastLineCount = -1;
         
         public LineNumberComponent() {
             setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
@@ -71,19 +72,32 @@ public class UnifiedNoteAppFrame extends JFrame {
             
             // 监听文档变化，实时更新行号显示
             bodyArea.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-                public void insertUpdate(javax.swing.event.DocumentEvent e) { repaint(); }
-                public void removeUpdate(javax.swing.event.DocumentEvent e) { repaint(); }
-                public void changedUpdate(javax.swing.event.DocumentEvent e) { repaint(); }
+                public void insertUpdate(javax.swing.event.DocumentEvent e) { onDocumentChanged(); }
+                public void removeUpdate(javax.swing.event.DocumentEvent e) { onDocumentChanged(); }
+                public void changedUpdate(javax.swing.event.DocumentEvent e) { onDocumentChanged(); }
             });
             
             // 监听光标变化，确保行号区域及时更新
             bodyArea.addCaretListener(e -> repaint());
         }
         
+        /**
+         * 宽度只取决于总行数，因此只在行数真正变化时才 revalidate，
+         * 避免每次按键都触发一次布局。
+         */
+        private void onDocumentChanged() {
+            int lines = bodyArea.getLineCount();
+            if (lines != lastLineCount) {
+                lastLineCount = lines;
+                revalidate();
+            }
+            repaint();
+        }
+        
         @Override
         public Dimension getPreferredSize() {
             // 计算行号区域的宽度
-            int lines = getLineCount();
+            int lines = bodyArea.getLineCount();
             int digits = Math.max(String.valueOf(lines).length(), 3); // 至少3位宽度
             FontMetrics fm = getFontMetrics(getFont());
             int width = fm.stringWidth("0") * digits + PADDING * 2;
@@ -111,69 +125,25 @@ public class UnifiedNoteAppFrame extends JFrame {
                 int startOffset = bodyArea.viewToModel2D(new Point(0, visibleRect.y));
                 int endOffset = bodyArea.viewToModel2D(new Point(0, visibleRect.y + visibleRect.height));
                 
-                String text = bodyArea.getText();
-                int startLine = getLineNumberAtOffset(text, startOffset);
-                int endLine = getLineNumberAtOffset(text, endOffset);
+                // 用 Element 结构定位（O(log n)），不再拷贝全文逐字符扫描。
+                // 行号按逻辑行绘制：自动换行折出的多个视觉行只在起始行显示一次号码。
+                int lineCount = bodyArea.getLineCount();
+                int startLine = bodyArea.getLineOfOffset(Math.max(0, startOffset));
+                int endLine = Math.min(bodyArea.getLineOfOffset(Math.max(0, endOffset)), lineCount - 1);
                 
                 // 绘制每一行的行号
                 for (int line = startLine; line <= endLine; line++) {
-                    int offset = getOffsetOfLine(text, line);
-                    if (offset >= 0) {
-                        Rectangle r = bodyArea.modelToView2D(offset).getBounds();
-                        String lineNum = String.valueOf(line);
-                        int x = getWidth() - fm.stringWidth(lineNum) - PADDING;
-                        int y = r.y + fm.getAscent();
-                        g2d.drawString(lineNum, x, y);
-                    }
+                    int offset = bodyArea.getLineStartOffset(line);
+                    Rectangle r = bodyArea.modelToView2D(offset).getBounds();
+                    String lineNum = String.valueOf(line + 1); // Element 行号 0 基，显示 1 基
+                    int x = getWidth() - fm.stringWidth(lineNum) - PADDING;
+                    int y = r.y + fm.getAscent();
+                    g2d.drawString(lineNum, x, y);
                 }
                 
             } catch (Exception e) {
                 // 如果出现异常，不影响编辑器的正常使用
             }
-        }
-        
-        /**
-         * 获取文档总行数
-         */
-        private int getLineCount() {
-            String text = bodyArea.getText();
-            if (text == null || text.isEmpty()) return 1;
-            int lines = 1;
-            for (int i = 0; i < text.length(); i++) {
-                if (text.charAt(i) == '\n') lines++;
-            }
-            return lines;
-        }
-        
-        /**
-         * 获取指定偏移位置所在的行号（从1开始）
-         */
-        private int getLineNumberAtOffset(String text, int offset) {
-            if (text == null || text.isEmpty() || offset < 0) return 1;
-            int line = 1;
-            for (int i = 0; i < Math.min(offset, text.length()); i++) {
-                if (text.charAt(i) == '\n') line++;
-            }
-            return line;
-        }
-        
-        /**
-         * 获取指定行号的起始偏移位置
-         */
-        private int getOffsetOfLine(String text, int lineNumber) {
-            if (lineNumber <= 0 || text == null) return 0;
-            if (lineNumber == 1) return 0;
-            
-            int currentLine = 1;
-            for (int i = 0; i < text.length(); i++) {
-                if (text.charAt(i) == '\n') {
-                    currentLine++;
-                    if (currentLine == lineNumber) {
-                        return i + 1;
-                    }
-                }
-            }
-            return -1; // 行号超出范围
         }
     }
     
@@ -201,6 +171,11 @@ public class UnifiedNoteAppFrame extends JFrame {
 
     private final NoteRepository repository;
     private final com.gt.service.NoteService noteService;
+
+    /** 供设置面板等外部组件复用同一个服务实例 */
+    public com.gt.service.NoteService getNoteService() {
+        return noteService;
+    }
     private TrayIcon trayIcon; // 系统托盘图标
 
     // 首行承载"快捷命令 空格 描述"，不再使用独立的输入框
@@ -248,6 +223,10 @@ public class UnifiedNoteAppFrame extends JFrame {
 
     // 多光标管理器
     private MultiCursorManager multiCursorManager;
+
+    // 撤销/重做管理器。必须是字段而非局部变量：切换笔记时要 discardAllEdits，
+    // 否则 setText 产生的编辑记录会让 Ctrl+Z 回滚到上一篇笔记的内容。
+    private final UndoManager undoManager = new UndoManager();
 
     private NoteDto current;
     
@@ -426,7 +405,6 @@ public class UnifiedNoteAppFrame extends JFrame {
         bodyArea.setFont(editorFont);
 
         // 撤销/重做支持（Ctrl+Z / Ctrl+Y）
-        final UndoManager undoManager = new UndoManager();
         bodyArea.getDocument().addUndoableEditListener(new UndoableEditListener() {
             @Override public void undoableEditHappened(UndoableEditEvent e) {
                 undoManager.addEdit(e.getEdit());
@@ -628,6 +606,13 @@ public class UnifiedNoteAppFrame extends JFrame {
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksCtrlF, "toggleSearch");
         root.getActionMap().put("toggleSearch", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) { toggleSearchPanel(); }
+        });
+        
+        // Alt+K -> 把当前笔记设为私密/取消私密
+        KeyStroke ksAltK = KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_K, java.awt.event.InputEvent.ALT_DOWN_MASK);
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(ksAltK, "togglePrivate");
+        root.getActionMap().put("togglePrivate", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { togglePrivateNote(); }
         });
         root.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(ksCtrlAltZ, "undoSoftDelete");
         root.getActionMap().put("undoSoftDelete", new AbstractAction() {
@@ -929,6 +914,29 @@ public class UnifiedNoteAppFrame extends JFrame {
     private javax.swing.Timer previewTimer;
     private JScrollPane bodyScrollPane;
     private LineNumberComponent lineNumberComponent; // 行号组件
+
+    // Mermaid 异步渲染：kroki.io 请求超时各 15 秒，绝不能放在 EDT 上执行
+    private static final String KROKI_MERMAID_URL = "https://kroki.io/mermaid/png";
+    private final java.util.Set<String> mermaidPending = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final java.util.Set<String> mermaidFailed = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final java.util.concurrent.ExecutorService mermaidExecutor =
+        java.util.concurrent.Executors.newFixedThreadPool(2, r -> {
+            Thread t = new Thread(r, "mermaid-render");
+            t.setDaemon(true);
+            return t;
+        });
+    private javax.swing.Timer mermaidRefreshTimer; // 合并多张图先后到达引起的重复刷新
+
+    // 预览自适应渲染：超过阈值只渲染光标所在章节。
+    // 大文档预览的开销大头是 JEditorPane 解析 HTML，必须限制送进去的内容量。
+    private static final int PREVIEW_SECTION_ON = 50 * 1024;  // 超过此值切分节
+    private static final int PREVIEW_SECTION_OFF = 45 * 1024; // 回落到此值才切回全文（滞回）
+    private boolean previewSectionMode = false;
+    private int previewSectionStart = 0;
+    private int previewSectionEnd = Integer.MAX_VALUE;
+    private int lastRenderedSectionStart = -1;
+    private javax.swing.event.DocumentListener previewDocListener; // 复用，避免每次开预览都新增一个
+    private javax.swing.event.CaretListener previewCaretListener;
     
     // 目录面板相关
     private boolean tocVisible = false; // 预览模式下目录面板默认隐藏
@@ -1038,9 +1046,11 @@ public class UnifiedNoteAppFrame extends JFrame {
             
             // 恢复三栏分屏布局：编辑区 | 目录区 | 预览区
             JScrollPane leftScrollPane = new JScrollPane(bodyArea);
-            LineNumberComponent lineNumber = new LineNumberComponent();
-            leftScrollPane.setRowHeaderView(lineNumber);
+            // 复用同一个行号实例：每 new 一个都会给 Document 和 bodyArea 各挂一个
+            // 永不移除的监听器，反复切换预览会线性累积重绘开销
+            leftScrollPane.setRowHeaderView(lineNumberComponent);
             applyScrollPaneTheme(leftScrollPane);
+            bodyScrollPane = leftScrollPane;
             
             // 重新创建目录和预览的分割面板（内层）
             previewWithTocSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
@@ -1199,14 +1209,26 @@ public class UnifiedNoteAppFrame extends JFrame {
                 try {
                     JScrollBar leftBar = leftScrollPane.getVerticalScrollBar();
                     JScrollBar rightBar = htmlScrollPane.getVerticalScrollBar();
-                    
-                    int leftMax = leftBar.getMaximum() - leftBar.getVisibleAmount();
-                    if (leftMax > 0) {
-                        double scrollPercent = (double) leftBar.getValue() / leftMax;
-                        int rightMax = rightBar.getMaximum() - rightBar.getVisibleAmount();
-                        int rightValue = (int) (scrollPercent * rightMax);
-                        rightBar.setValue(rightValue);
+
+                    int rightMax = rightBar.getMaximum() - rightBar.getVisibleAmount();
+                    if (rightMax <= 0) return;
+
+                    double scrollPercent;
+                    if (previewSectionMode) {
+                        // 编辑区滚动条覆盖全文，预览只有当前章节，直接按整条比例映射会乱跳。
+                        // 改为把视口顶部换算成文档偏移，再取它在本章节内的相对位置。
+                        Rectangle visible = bodyArea.getVisibleRect();
+                        int topOffset = bodyArea.viewToModel2D(new Point(0, visible.y));
+                        int span = previewSectionEnd - previewSectionStart;
+                        if (span <= 0) return;
+                        scrollPercent = (double) (topOffset - previewSectionStart) / span;
+                        scrollPercent = Math.max(0.0, Math.min(1.0, scrollPercent));
+                    } else {
+                        int leftMax = leftBar.getMaximum() - leftBar.getVisibleAmount();
+                        if (leftMax <= 0) return;
+                        scrollPercent = (double) leftBar.getValue() / leftMax;
                     }
+                    rightBar.setValue((int) (scrollPercent * rightMax));
                 } catch (Exception ignored) {
                 }
             }
@@ -1323,10 +1345,13 @@ public class UnifiedNoteAppFrame extends JFrame {
      */
     private void updateTocPanel() {
         if (tocModel == null) return;
-        
-        String md = bodyArea.getText();
-        List<TocItem> toc = extractTocFromMarkdown(md);
-        
+        updateTocPanel(extractTocFromMarkdown(bodyArea.getText()));
+    }
+
+    /** 目录始终基于全文，即使预览只渲染当前章节，也保持全篇导航能力 */
+    private void updateTocPanel(List<TocItem> toc) {
+        if (tocModel == null) return;
+
         tocModel.clear();
         for (TocItem item : toc) {
             tocModel.addElement(item);
@@ -1390,9 +1415,11 @@ public class UnifiedNoteAppFrame extends JFrame {
 
             // 为预览模式创建带行号的 JScrollPane
             JScrollPane leftScrollPane = new JScrollPane(bodyArea);
-            LineNumberComponent previewLineNumberComponent = new LineNumberComponent();
-            leftScrollPane.setRowHeaderView(previewLineNumberComponent);
+            leftScrollPane.setRowHeaderView(lineNumberComponent);
             applyScrollPaneTheme(leftScrollPane);
+            // 让 bodyScrollPane 始终指向当前真正承载 bodyArea 的容器，
+            // 否则 openNoteAndJumpToH1 会对着已脱离视图树的旧容器做滚动定位
+            bodyScrollPane = leftScrollPane;
             
             // 创建右侧预览区的滚动面板
             htmlScrollPane = new JScrollPane(htmlPane);
@@ -1431,30 +1458,52 @@ public class UnifiedNoteAppFrame extends JFrame {
             // 添加滚动同步
             addScrollSync(leftScrollPane);
 
-            refreshInAppPreview();
             previewVisible = true;
             previewFullscreen = false; // 初始为分屏模式
+            lastRenderedSectionStart = -1;
+            refreshInAppPreview();
             // 安装实时预览（去抖200ms）
             if (previewTimer == null) {
                 previewTimer = new javax.swing.Timer(200, e -> refreshInAppPreview());
                 previewTimer.setRepeats(false);
             }
-            bodyArea.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-                public void insertUpdate(javax.swing.event.DocumentEvent e) { previewTimer.restart(); }
-                public void removeUpdate(javax.swing.event.DocumentEvent e) { previewTimer.restart(); }
-                public void changedUpdate(javax.swing.event.DocumentEvent e) { previewTimer.restart(); }
-            });
+            // 监听器只创建一次并在关闭预览时移除，否则每按一次 Alt+P 就多累积一个
+            if (previewDocListener == null) {
+                previewDocListener = new javax.swing.event.DocumentListener() {
+                    public void insertUpdate(javax.swing.event.DocumentEvent e) { previewTimer.restart(); }
+                    public void removeUpdate(javax.swing.event.DocumentEvent e) { previewTimer.restart(); }
+                    public void changedUpdate(javax.swing.event.DocumentEvent e) { previewTimer.restart(); }
+                };
+            }
+            bodyArea.getDocument().addDocumentListener(previewDocListener);
+
+            // 分节模式下预览跟随光标：只有当光标离开当前章节范围才重渲染。
+            // 这里刻意只比较已缓存的边界，保持 O(1)，不能在每次光标移动时重新扫描全文。
+            if (previewCaretListener == null) {
+                previewCaretListener = e -> {
+                    if (!previewVisible || !previewSectionMode) return;
+                    int dot = e.getDot();
+                    if (dot < previewSectionStart || dot >= previewSectionEnd) {
+                        previewTimer.restart();
+                    }
+                };
+            }
+            bodyArea.addCaretListener(previewCaretListener);
+
+            showPreviewBadge("分屏预览（Alt+P退出，Alt+T切换目录）");
             
             // 焦点返回到编辑区
             SwingUtilities.invokeLater(() -> bodyArea.requestFocusInWindow());
         } else {
             // 关闭预览，恢复原布局
+            if (previewTimer != null) previewTimer.stop();
+            if (previewDocListener != null) bodyArea.getDocument().removeDocumentListener(previewDocListener);
+            if (previewCaretListener != null) bodyArea.removeCaretListener(previewCaretListener);
             getContentPane().remove(centerComponent);
             bodyScrollPane = new JScrollPane(bodyArea);
             
             // 添加行号显示组件（恢复普通模式时也需要行号）
-            LineNumberComponent normalLineNumberComponent = new LineNumberComponent();
-            bodyScrollPane.setRowHeaderView(normalLineNumberComponent);
+            bodyScrollPane.setRowHeaderView(lineNumberComponent);
             
             JPanel editor2 = new JPanel(new BorderLayout());
             editor2.setBackground(UIColors.BG_PRIMARY);
@@ -1474,22 +1523,63 @@ public class UnifiedNoteAppFrame extends JFrame {
     }
 
     private void refreshInAppPreview() {
-        String md = bodyArea.getText();
-        // 预处理：为 Markdown 表格自动补充必要的空行，避免被当作普通段落渲染
-        md = normalizeMarkdownTables(md);
-        // 大文档降频：超过 50KB 时预览去抖提升到 600ms
-        if (md != null && md.length() > 50 * 1024 && previewTimer != null) {
-            int delay = 600;
+        if (htmlPane == null) return;
+        String fullMd = bodyArea.getText();
+        if (fullMd == null) fullMd = "";
+
+        // 滞回切换渲染模式，避免正文在阈值上下横跳时预览来回切
+        if (!previewSectionMode && fullMd.length() > PREVIEW_SECTION_ON) {
+            previewSectionMode = true;
+        } else if (previewSectionMode && fullMd.length() < PREVIEW_SECTION_OFF) {
+            previewSectionMode = false;
+        }
+
+        String md;
+        if (previewSectionMode) {
+            int[] range = NoteH1Parser.findSectionRange(fullMd, bodyArea.getCaretPosition());
+            previewSectionStart = range[0];
+            previewSectionEnd = range[1];
+            md = fullMd.substring(range[0], range[1]);
+        } else {
+            previewSectionStart = 0;
+            previewSectionEnd = Integer.MAX_VALUE;
+            md = fullMd;
+        }
+
+        // 同一章节内的刷新（例如打字）保持滚动位置，切换章节才回到顶部
+        boolean sameSection = (previewSectionStart == lastRenderedSectionStart);
+        int prevScroll = (sameSection && htmlScrollPane != null)
+                ? htmlScrollPane.getVerticalScrollBar().getValue() : 0;
+        lastRenderedSectionStart = previewSectionStart;
+
+        // 分节后单次渲染量已经很小，去抖统一回到 200ms（原先提到 600ms 后从不回落）
+        if (previewTimer != null) {
+            int delay = (!previewSectionMode && fullMd.length() > PREVIEW_SECTION_ON) ? 600 : 200;
             if (previewTimer.getDelay() != delay) previewTimer.setDelay(delay);
         }
+
+        // 预处理：为 Markdown 表格自动补充必要的空行，避免被当作普通段落渲染
+        md = normalizeMarkdownTables(md);
         // 将所有 LaTeX 片段替换为内联图片占位
         String mdWithImgs = replaceAllLatexWithImages(md);
         // 将所有 Mermaid 代码块替换为图片
         mdWithImgs = replaceAllMermaidWithImages(mdWithImgs);
         // 规范化将标题后的 (#id) 转为 {#id}
         String normalized = normalizeHeadingAnchors(mdWithImgs);
+        
+        // 目录基于全文提取，同时用它为锚点计数预置种子：
+        // 分节渲染只看得到局部内容，没有种子的话同名标题的序号会与目录对不上
+        List<TocItem> toc = extractTocFromMarkdown(fullMd);
+        java.util.Map<String, Integer> anchorSeed = new java.util.HashMap<>();
+        if (previewSectionMode) {
+            int sectionStartLine = NoteH1Parser.getLineNumber(fullMd, previewSectionStart);
+            for (TocItem it : toc) {
+                if (it.lineNumber >= sectionStartLine) break;
+                nextHeadingAnchor(it.text, anchorSeed);
+            }
+        }
         // 为没有锚点ID的标题自动添加锚点
-        String withAnchors = addHeadingAnchors(normalized);
+        String withAnchors = addHeadingAnchors(normalized, anchorSeed);
         String html = renderMarkdown(withAnchors);
         
         // 将相对图片路径转换为绝对路径（用于预览本地图片）
@@ -1507,31 +1597,13 @@ public class UnifiedNoteAppFrame extends JFrame {
                          "</style></head><body>" + html + "</body></html>";
         htmlPane.setText(fullHtml);
         htmlPane.setCaretPosition(0);
+        if (prevScroll > 0 && htmlScrollPane != null) {
+            final int restore = prevScroll;
+            SwingUtilities.invokeLater(() -> htmlScrollPane.getVerticalScrollBar().setValue(restore));
+        }
         
-        // 更新目录面板
-        updateTocPanel();
-        
-        // 预览指示浮标
-        try {
-            JLayeredPane layered = getLayeredPane();
-            JLabel badge = new JLabel("预览中（Alt+P退出）");
-            badge.setOpaque(true);
-            badge.setBackground(new Color(0,0,0,150));
-            badge.setForeground(Color.WHITE);
-            badge.setBorder(BorderFactory.createEmptyBorder(4,8,4,8));
-            Dimension sz = badge.getPreferredSize();
-            int x = getWidth() - sz.width - 24;
-            int y = 12;
-            badge.setBounds(x, y, sz.width, sz.height);
-            layered.add(badge, JLayeredPane.POPUP_LAYER);
-            javax.swing.Timer t = new javax.swing.Timer(1200, e -> {
-                layered.remove(badge);
-                layered.revalidate();
-                layered.repaint();
-            });
-            t.setRepeats(false);
-            t.start();
-        } catch (Exception ignored) {}
+        // 更新目录面板（复用上面已按全文提取的结果）
+        updateTocPanel(toc);
     }
     
     /**
@@ -1643,41 +1715,81 @@ public class UnifiedNoteAppFrame extends JFrame {
      */
     private String convertMermaidToImageTag(String mermaidCode) {
         try {
-            logger.debug("[Mermaid] 原始代码长度: {} 字符", mermaidCode.length());
-            
-            // 步骤1: 清理特殊字符
-            String cleanedCode = cleanMermaidCode(mermaidCode);
-            logger.debug("[Mermaid] 清理后代码:\n{}", cleanedCode);
-            
-            // 步骤2: 语法预处理（兼容性转换）
-            String processedCode = preprocessMermaidCode(cleanedCode);
-            if (!processedCode.equals(cleanedCode)) {
-                logger.debug("[Mermaid] 预处理后代码:\n{}", processedCode);
+            String processedCode = preprocessMermaidCode(cleanMermaidCode(mermaidCode));
+            File cached = mermaidCacheFile(processedCode);
+
+            // 命中缓存：直接出图，不发起任何网络请求。这也是异步刷新能够收敛的依据。
+            if (cached.exists() && cached.length() > 0) {
+                return "\n<img src='" + cached.toURI().toString() + "' alt='Mermaid Diagram'"
+                     + " style='max-width:100%; display:block; margin:10px auto;'/>\n";
             }
-            
-            // 使用 kroki.io API（POST 方式，避免 URL 长度限制）
-            String apiUrl = "https://kroki.io/mermaid/png";
-            logger.debug("[Mermaid] 使用 Kroki API (POST): {}", apiUrl);
-            
-            // 下载图片到本地（使用 POST 方式）
-            File localImageFile = downloadMermaidImagePost(apiUrl, processedCode);
-            
-            if (localImageFile != null && localImageFile.exists()) {
-                String localUrl = localImageFile.toURI().toString();
-                logger.debug("[Mermaid] 本地图片路径: {}", localUrl);
-                return "\n<img src='" + localUrl + "' alt='Mermaid Diagram' style='max-width:100%; display:block; margin:10px auto;'/>\n";
-            } else {
-                logger.error("[Mermaid] 图片下载失败");
+
+            if (mermaidFailed.contains(cached.getName())) {
                 return "\n<div style='color:orange; border:1px solid orange; padding:10px; margin:10px;'>" +
                        "⚠️ Mermaid 图表加载失败，请检查网络连接</div>\n";
             }
-            
+
+            scheduleMermaidRender(processedCode, cached);
+            return "\n<div style='color:gray; border:1px dashed gray; padding:10px; margin:10px;'>" +
+                   "⏳ Mermaid 图表渲染中…</div>\n";
+
         } catch (Exception e) {
             logger.error("[Mermaid] 转换失败: {}", e.getMessage(), e);
             return "\n<div style='color:red; border:1px solid red; padding:10px; margin:10px;'>" +
                    "❌ Mermaid 图表转换失败<br/>" +
                    "错误: " + e.getMessage() + "</div>\n";
         }
+    }
+
+    /**
+     * Mermaid 图片的缓存文件位置。以处理后代码的哈希命名，供渲染前查表与下载后落盘共用。
+     */
+    private File mermaidCacheFile(String processedCode) {
+        File tempDir = new File(System.getProperty("java.io.tmpdir"), "fastpig_mermaid");
+        if (!tempDir.exists()) {
+            tempDir.mkdirs();
+        }
+        return new File(tempDir, Integer.toHexString(processedCode.hashCode()) + ".png");
+    }
+
+    /**
+     * 在后台线程渲染 Mermaid 图，完成后合并刷新预览。
+     * 同一张图并发只会有一个任务；失败的图记入 mermaidFailed 不再重试，
+     * 因此由刷新触发的渲染不会再触发新的刷新，循环可收敛。
+     */
+    private void scheduleMermaidRender(String processedCode, File target) {
+        final String key = target.getName();
+        if (!mermaidPending.add(key)) return; // 已有任务在跑
+
+        mermaidExecutor.submit(() -> {
+            File result = null;
+            try {
+                result = downloadMermaidImagePost(KROKI_MERMAID_URL, processedCode);
+            } catch (Exception e) {
+                logger.error("[Mermaid] 后台渲染失败: {}", e.getMessage(), e);
+            } finally {
+                mermaidPending.remove(key);
+            }
+            if (result == null || !result.exists() || result.length() == 0) {
+                mermaidFailed.add(key);
+            }
+            SwingUtilities.invokeLater(this::scheduleMermaidPreviewRefresh);
+        });
+    }
+
+    /**
+     * 图片就绪后刷新预览。用 300ms 去抖合并多张图先后到达的情况，
+     * 且不复用 previewTimer，避免干扰用户输入的去抖节奏。
+     */
+    private void scheduleMermaidPreviewRefresh() {
+        if (!previewVisible) return;
+        if (mermaidRefreshTimer == null) {
+            mermaidRefreshTimer = new javax.swing.Timer(300, e -> {
+                if (previewVisible) refreshInAppPreview();
+            });
+            mermaidRefreshTimer.setRepeats(false);
+        }
+        mermaidRefreshTimer.restart();
     }
     
     /**
@@ -1688,19 +1800,11 @@ public class UnifiedNoteAppFrame extends JFrame {
      */
     private File downloadMermaidImagePost(String apiUrl, String mermaidCode) {
         try {
-            // 创建临时目录
-            File tempDir = new File(System.getProperty("java.io.tmpdir"), "fastpig_mermaid");
-            if (!tempDir.exists()) {
-                tempDir.mkdirs();
-            }
-            
-            // 使用 Mermaid 代码的哈希作为文件名，避免重复下载
-            String fileName = Integer.toHexString(mermaidCode.hashCode()) + ".png";
-            File localFile = new File(tempDir, fileName);
+            File localFile = mermaidCacheFile(mermaidCode);
             
             // 如果文件已存在，直接返回（缓存）
             if (localFile.exists() && localFile.length() > 0) {
-                logger.debug("[Mermaid] 使用缓存图片: {}", fileName);
+                logger.debug("[Mermaid] 使用缓存图片: {}", localFile.getName());
                 return localFile;
             }
             
@@ -1724,18 +1828,19 @@ public class UnifiedNoteAppFrame extends JFrame {
             logger.debug("[Mermaid] HTTP 响应码: {}", responseCode);
             
             if (responseCode == 200) {
-                // 读取图片数据
-                java.io.InputStream in = conn.getInputStream();
-                java.io.FileOutputStream out = new java.io.FileOutputStream(localFile);
-                
-                byte[] buffer = new byte[8192];
-                int bytesRead;
-                while ((bytesRead = in.read(buffer)) != -1) {
-                    out.write(buffer, 0, bytesRead);
+                // 先写入临时文件再原子改名：渲染线程与 EDT 的刷新是并发的，
+                // 若直接写目标文件，刷新可能读到只下了一半的图片并当作缓存命中
+                File partFile = new File(localFile.getAbsolutePath() + ".part");
+                try (java.io.InputStream in = conn.getInputStream();
+                     java.io.FileOutputStream out = new java.io.FileOutputStream(partFile)) {
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, bytesRead);
+                    }
                 }
-                
-                out.close();
-                in.close();
+                java.nio.file.Files.move(partFile.toPath(), localFile.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                 
                 logger.debug("[Mermaid] 图片下载成功: {} 字节", localFile.length());
                 return localFile;
@@ -1787,6 +1892,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         java.util.regex.Pattern codeBlockPattern = java.util.regex.Pattern.compile("^```"); // 匹配代码块分隔符
         
         boolean inCodeBlock = false; // 跟踪是否在代码块内
+        java.util.Map<String, Integer> dupCounter = new java.util.HashMap<>();
         
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i];
@@ -1812,10 +1918,11 @@ public class UnifiedNoteAppFrame extends JFrame {
                 int level = hashes.length();
                 int lineNumber = i + 1; // 行号从1开始
                 
-                // 如果没有显式指定 anchorId，生成一个
+                // 如果没有显式指定 anchorId，按标题文本生成。
+                // 不能用行号：预览分节渲染时行号会错位，而表格规范化与公式/图表替换
+                // 也会增删行，使行号在全文模式下同样对不上。
                 if (anchorId == null || anchorId.isEmpty()) {
-                    // 生成简单的锚点ID：移除特殊字符，转为小写，空格转为连字符
-                    anchorId = "heading-" + lineNumber;
+                    anchorId = nextHeadingAnchor(text, dupCounter);
                 }
                 
                 toc.add(new TocItem(text, level, lineNumber, anchorId));
@@ -1895,7 +2002,26 @@ public class UnifiedNoteAppFrame extends JFrame {
     /**
      * 为所有标题添加锚点ID（如果尚未指定）
      */
-    private String addHeadingAnchors(String src) {
+    /**
+     * 由标题文本生成锚点 ID，同名标题按出现序号区分。
+     * 目录提取与锚点注入必须共用此方法，否则点击目录跳不到预览的对应位置。
+     */
+    private String nextHeadingAnchor(String text, java.util.Map<String, Integer> dupCounter) {
+        String slug = text.toLowerCase()
+                          .replaceAll("[^a-z0-9\\u4e00-\\u9fa5]+", "-")
+                          .replaceAll("^-+|-+$", "");
+        if (slug.isEmpty()) slug = "h";
+        int n = dupCounter.merge(slug, 1, Integer::sum);
+        return "h-" + Integer.toHexString(slug.hashCode()) + (n > 1 ? ("-" + n) : "");
+    }
+
+    /**
+     * 为没有锚点的标题注入 {#id}。
+     *
+     * @param dupSeed 章节之前已出现过的同名标题计数。分节渲染时只看得到局部内容，
+     *                必须由调用方按全文预置，同名标题的序号才能与目录一致。
+     */
+    private String addHeadingAnchors(String src, java.util.Map<String, Integer> dupSeed) {
         if (src == null || src.isEmpty()) return src;
         
         String[] lines = src.split("\n", -1);
@@ -1903,9 +2029,24 @@ public class UnifiedNoteAppFrame extends JFrame {
         
         // 匹配标题行，可能已经有 {#id} 或没有
         java.util.regex.Pattern headingPattern = java.util.regex.Pattern.compile("^(#{1,6}\\s+)(.+?)(?:\\s*\\{#([A-Za-z0-9_-]+)\\})?\\s*$");
+        java.util.regex.Pattern codeBlockPattern = java.util.regex.Pattern.compile("^```");
+        boolean inCodeBlock = false;
         
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i];
+            
+            // 与目录提取保持一致地跳过代码块，否则代码里的 # 注释会拿到锚点、
+            // 使标题序列错位，目录跳转全部偏移
+            if (codeBlockPattern.matcher(line.trim()).find()) {
+                inCodeBlock = !inCodeBlock;
+                out.append(line).append('\n');
+                continue;
+            }
+            if (inCodeBlock) {
+                out.append(line).append('\n');
+                continue;
+            }
+            
             java.util.regex.Matcher matcher = headingPattern.matcher(line);
             
             if (matcher.find()) {
@@ -1915,7 +2056,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                 
                 if (existingId == null || existingId.isEmpty()) {
                     // 没有锚点ID，自动生成
-                    String anchorId = "heading-" + (i + 1);
+                    String anchorId = nextHeadingAnchor(text, dupSeed);
                     out.append(hashes).append(text).append(" {#").append(anchorId).append("}").append('\n');
                 } else {
                     // 已有锚点ID，保持原样
@@ -2101,11 +2242,24 @@ public class UnifiedNoteAppFrame extends JFrame {
             } catch (Exception e) {
                 logger.error("加载笔记正文失败: {} - {}", n.id, e.getMessage());
             }
+
+        // 上一篇如果是私密笔记，切走时立即清掉内存中的明文密钥
+        com.gt.crypto.NoteEncryptionService.lock(current);
+
+        // 私密笔记：先解锁再灌入编辑区，解锁失败就不打开
+        if (n.encrypted && !unlockNote(n)) {
+            return;
+        }
+
         current = n;
         String first = (n.key==null? "" : n.key) + (n.desc!=null && !n.desc.isEmpty()? (" " + n.desc) : "");
         String body = n.bodyMd==null? "" : n.bodyMd;
         if (!body.startsWith("\n") && !body.isEmpty()) body = "\n" + body;
+        // 先清理与旧文档绑定的偏移量状态，此时偏移仍然有效
+        resetEditorTransientState();
         bodyArea.setText(first + body);
+        // setText 产生"删除全文 + 插入全文"两条编辑记录，必须在此丢弃
+        undoManager.discardAllEdits();
         // 将光标移到文档开头（首行末尾）
         bodyArea.setCaretPosition(first.length());
         updateFirstLineHighlight();
@@ -2113,6 +2267,153 @@ public class UnifiedNoteAppFrame extends JFrame {
         } finally {
             isLoading = false; // 加载完成
         }
+    }
+
+    /**
+     * 把当前笔记设为私密，或取消私密（Alt+K）。
+     * 取消私密前笔记必然已解锁，因此 bodyMd 是明文，直接落盘即可。
+     */
+    private void togglePrivateNote() {
+        if (current == null) {
+            JOptionPane.showMessageDialog(this, "请先保存笔记再设置私密", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        if (current.encrypted) {
+            int confirm = JOptionPane.showConfirmDialog(this,
+                    "取消私密后，笔记「" + current.key + "」将以明文保存，确定吗？",
+                    "取消私密", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (confirm != JOptionPane.YES_OPTION) return;
+
+            com.gt.crypto.NoteEncryptionService.disable(current);
+            saveUnified(true);
+            statusLeft.setText("已取消私密");
+            return;
+        }
+
+        AppConfig config = AppConfig.getInstance();
+        if (!config.isMasterPasswordSet()) {
+            JOptionPane.showMessageDialog(this,
+                    "请先在设置中配置主密码。\n主密码是忘记笔记密码后唯一的恢复通道，未设置时不允许加密。",
+                    "尚未设置主密码", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        char[] notePwd = promptNewPassword("为笔记「" + current.key + "」设置密码");
+        if (notePwd == null) return;
+
+        char[] masterPwd = promptPassword("请输入主密码以建立恢复通道");
+        if (masterPwd == null) {
+            com.gt.crypto.NoteCrypto.wipe(notePwd);
+            return;
+        }
+
+        try {
+            if (!config.verifyMasterPassword(masterPwd)) {
+                JOptionPane.showMessageDialog(this, "主密码错误", "设置失败", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            com.gt.crypto.NoteEncryptionService.enable(current, notePwd, masterPwd);
+            saveUnified(true);
+            statusLeft.setText("已设为私密笔记");
+            JOptionPane.showMessageDialog(this,
+                    "笔记已加密。下次打开需要输入密码，忘记时可用主密码恢复。",
+                    "已设为私密", JOptionPane.INFORMATION_MESSAGE);
+        } catch (Exception e) {
+            logger.error("设置私密笔记失败: {}", current.key, e);
+            JOptionPane.showMessageDialog(this, "设置失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+        } finally {
+            com.gt.crypto.NoteCrypto.wipe(notePwd);
+            com.gt.crypto.NoteCrypto.wipe(masterPwd);
+        }
+    }
+
+    /** 输入一次密码 */
+    private char[] promptPassword(String message) {
+        JPasswordField field = new JPasswordField(20);
+        int result = JOptionPane.showConfirmDialog(this, new Object[]{message, field},
+                "输入密码", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (result != JOptionPane.OK_OPTION) return null;
+        char[] pwd = field.getPassword();
+        return (pwd == null || pwd.length == 0) ? null : pwd;
+    }
+
+    /** 输入并确认新密码 */
+    private char[] promptNewPassword(String message) {
+        JPasswordField field = new JPasswordField(20);
+        JPasswordField confirmField = new JPasswordField(20);
+        int result = JOptionPane.showConfirmDialog(this,
+                new Object[]{message, field, "再次输入以确认", confirmField},
+                "设置密码", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (result != JOptionPane.OK_OPTION) return null;
+
+        char[] pwd = field.getPassword();
+        char[] confirm = confirmField.getPassword();
+        try {
+            if (pwd == null || pwd.length == 0) {
+                JOptionPane.showMessageDialog(this, "密码不能为空", "提示", JOptionPane.WARNING_MESSAGE);
+                return null;
+            }
+            if (!java.util.Arrays.equals(pwd, confirm)) {
+                JOptionPane.showMessageDialog(this, "两次输入的密码不一致", "提示", JOptionPane.WARNING_MESSAGE);
+                return null;
+            }
+            return pwd;
+        } finally {
+            com.gt.crypto.NoteCrypto.wipe(confirm);
+        }
+    }
+
+    /**
+     * 弹出解锁框并尝试解密笔记正文。
+     * 解锁成功后 note.bodyMd 变为明文，编辑器与预览无需感知加密。
+     *
+     * @return 是否解锁成功
+     */
+    private boolean unlockNote(NoteDto note) {
+        // 能否走恢复通道，只看这篇笔记自己有没有主密码包裹的密钥，
+        // 不看 config.properties 里的校验值。重装或重新打包会换掉配置文件，
+        // 但笔记里的包裹密钥仍然有效，此时若以配置为准就会把恢复通道白白锁死。
+        boolean masterAvailable = note.masterWrappedDek != null && !note.masterWrappedDek.isEmpty();
+        
+        while (true) {
+            UnlockNoteDialog.Result input = UnlockNoteDialog.prompt(this, note.key, masterAvailable);
+            if (input == null) {
+                statusLeft.setText("已取消解锁");
+                return false;
+            }
+            try {
+                com.gt.crypto.NoteEncryptionService.unlock(note, input.password, input.useMaster);
+                statusLeft.setText("已解锁");
+                return true;
+            } catch (com.gt.crypto.NoteCrypto.WrongPasswordException e) {
+                JOptionPane.showMessageDialog(this, "密码错误", "解锁失败", JOptionPane.WARNING_MESSAGE);
+            } catch (Exception e) {
+                logger.error("解锁笔记失败: {}", note.key, e);
+                JOptionPane.showMessageDialog(this, "解锁失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+                return false;
+            } finally {
+                input.wipe();
+            }
+        }
+    }
+
+    /**
+     * 清理所有以绝对偏移量记录、且只对当前文档有效的编辑器状态。
+     * 必须在 setText 切换文档内容之前调用：多光标与搜索/替换命中位置都存的是裸偏移，
+     * 换文档后这些偏移会指向错误位置，导致静默插入到错处或跳转时抛异常。
+     */
+    private void resetEditorTransientState() {
+        if (multiCursorManager != null) {
+            multiCursorManager.exitMultiCursorMode();
+        }
+        clearSearchHighlights();
+        searchMatchPositions.clear();
+        currentSearchIndex = -1;
+        clearReplaceHighlights();
+        replaceMatchPositions.clear();
+        replaceMatchLengths.clear();
+        currentReplaceIndex = -1;
     }
 
     private void doSearchFromFirstLine() {
@@ -2130,7 +2431,9 @@ public class UnifiedNoteAppFrame extends JFrame {
      */
     private void clearEditor() {
         current = null;
+        resetEditorTransientState();
         bodyArea.setText("");
+        undoManager.discardAllEdits();
         bodyArea.requestFocus();
         updateFirstLineHighlight();
         updateEditorStatus();
@@ -2209,6 +2512,15 @@ public class UnifiedNoteAppFrame extends JFrame {
     }
 
     private void saveUnified(boolean manual) {
+        // 锁定态一律不保存：此时编辑区里的内容不是这篇笔记的明文，
+        // 存下去会把空内容或别的内容重新加密写回，直接毁掉原文
+        if (current != null && current.encrypted && current.runtimeDek == null) {
+            if (manual) {
+                JOptionPane.showMessageDialog(this, "笔记处于锁定状态，无法保存", "提示", JOptionPane.WARNING_MESSAGE);
+            }
+            statusLeft.setText("已锁定，未保存");
+            return;
+        }
         try{
             statusLeft.setText(manual? "保存中…" : "自动保存中…");
             if (current == null) {
@@ -2292,10 +2604,12 @@ public class UnifiedNoteAppFrame extends JFrame {
                 hl.removeHighlight(firstLineHighlightTag);
                 firstLineHighlightTag = null;
             }
-            String text = bodyArea.getText();
-            if (text == null) return;
-            int end = text.indexOf('\n');
-            if (end < 0) end = text.length();
+            // 用首行 Element 取结束偏移，避免每次文档变更都拷贝一份全文
+            javax.swing.text.Document doc = bodyArea.getDocument();
+            javax.swing.text.Element root = doc.getDefaultRootElement();
+            if (root.getElementCount() == 0) return;
+            // 首行 Element 的 endOffset 含换行符；无换行时为 length+1，两种情况减 1 都正确
+            int end = Math.min(root.getElement(0).getEndOffset() - 1, doc.getLength());
             if (end > 0){
                 firstLineHighlightTag = hl.addHighlight(0, end, firstLinePainter);
             }
@@ -2325,12 +2639,11 @@ public class UnifiedNoteAppFrame extends JFrame {
     private void updateEditorStatus(){
         try{
             int caret = bodyArea.getCaretPosition();
-            String text = bodyArea.getText();
-            int line = 1, col = 1;
-            for (int i = 0; i < Math.min(caret, text.length()); i++){
-                if (text.charAt(i) == '\n'){ line++; col = 1; } else { col++; }
-            }
-            int len = text == null ? 0 : text.length();
+            // Element API 定位行列，O(log n)；原先是每次按键都逐字符扫到光标处
+            int lineIdx = bodyArea.getLineOfOffset(caret);
+            int line = lineIdx + 1;
+            int col = caret - bodyArea.getLineStartOffset(lineIdx) + 1;
+            int len = bodyArea.getDocument().getLength();
             String time = lastSavedAt == 0 ? "" : new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date(lastSavedAt));
             statusRight.setText("" + line + ":" + col + "  |  " + len + "字  " + (time.isEmpty()? "": (" |  更新时间 " + time)));
         }catch(Exception ignored){}
@@ -2929,12 +3242,15 @@ public class UnifiedNoteAppFrame extends JFrame {
     private void highlightCurrentMatch() {
         if (currentSearchIndex < 0 || currentSearchIndex >= searchMatchPositions.size()) return;
         
-        int pos = searchMatchPositions.get(currentSearchIndex);
-        bodyArea.setCaretPosition(pos);
+        // 钳制到当前文档长度：命中位置是在搜索那一刻记录的裸偏移，
+        // 若文档此后被改短，setCaretPosition 会抛 IllegalArgumentException
+        int pos = Math.max(0, Math.min(searchMatchPositions.get(currentSearchIndex),
+                                       bodyArea.getDocument().getLength()));
         try {
+            bodyArea.setCaretPosition(pos);
             bodyArea.scrollRectToVisible(bodyArea.modelToView2D(pos).getBounds());
         } catch (Exception e) {
-            e.printStackTrace();
+            logger.debug("定位搜索命中位置失败: pos={}", pos, e);
         }
     }
     

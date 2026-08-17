@@ -2,6 +2,7 @@ package com.gt.service;
 
 import com.gt.NoteDto;
 import com.gt.NoteRepository;
+import com.gt.crypto.NoteEncryptionService;
 import com.gt.storage.NoteFileStorage;
 import com.gt.vector.VectorSearchManager;
 import org.apache.logging.log4j.LogManager;
@@ -58,23 +59,129 @@ public class NoteService {
         // 自动递增版本号
         autoIncrementVersion(note);
 
-        // 计算内容哈希
+        // 内容哈希按明文计算：密文每次保存都换新 IV，用密文算哈希会让同步永远认为有变更
         note.contentHash = computeHash(note.bodyMd);
 
-        // 保存到文件
-        fileStorage.saveToFile(note);
+        // 私密笔记：落盘前把正文换成密文，写完再还原成明文供编辑器继续使用
+        String plaintextBody = null;
+        if (note.encrypted) {
+            try {
+                plaintextBody = NoteEncryptionService.sealForSave(note);
+            } catch (Exception e) {
+                throw new RuntimeException("加密笔记失败: " + e.getMessage(), e);
+            }
+        }
 
-        // 更新文件夹路径
-        Path folderPath = fileStorage.getNoteFolderPath(note);
-        note.folderPath = folderPath.toString();
+        try {
+            // 保存到文件
+            fileStorage.saveToFile(note);
 
-        // 更新索引（不存储正文，只存储元数据）
-        repository.saveIndex(note);
+            // 更新文件夹路径
+            Path folderPath = fileStorage.getNoteFolderPath(note);
+            note.folderPath = folderPath.toString();
 
-        // 更新向量索引（异步），使用描述而非标题
-        VectorSearchManager.getInstance().indexNote(note.key, note.desc, note.bodyMd);
+            // 更新索引（不存储正文，只存储元数据）
+            repository.saveIndex(note);
+        } finally {
+            // 无论成败都要把明文放回内存，否则编辑器里会突然变成一串 Base64
+            if (plaintextBody != null) {
+                note.bodyMd = plaintextBody;
+            }
+        }
 
-        logger.info("[NoteService] 已保存笔记: " + note.key + " (id=" + note.id + ", version=" + note.version + ")");
+        if (note.encrypted) {
+            // 向量索引里的 h1Title 是明文，私密笔记必须整体移出
+            VectorSearchManager.getInstance().removeNoteIndex(note.key);
+            // 清掉历史迁移可能残留在库里的明文正文
+            repository.clearBodyMd(note.id);
+        } else {
+            // 更新向量索引（异步），使用描述而非标题
+            VectorSearchManager.getInstance().indexNote(note.key, note.desc, note.bodyMd);
+        }
+
+        logger.info("[NoteService] 已保存笔记: " + note.key + " (id=" + note.id + ", version=" + note.version
+                + (note.encrypted ? ", encrypted" : "") + ")");
+    }
+
+    /**
+     * 主密码变更后，把所有私密笔记的 DEK 用新主密码重新包裹。
+     *
+     * 分两阶段：先把每篇都用旧主密码解开并全部校验通过，再统一落盘。
+     * 不这么做的话，中途某篇解不开就会留下"一半用新主密码、一半用旧主密码"的
+     * 混合状态，而旧主密码此时已经被覆盖，那半篇笔记的恢复通道就永久失效了。
+     *
+     * @return 重新包裹的笔记数量
+     * @throws IllegalStateException 有笔记无法用旧主密码解开时抛出，此时不改动任何文件
+     */
+    public int rewrapAllWithNewMaster(char[] oldMaster, char[] newMaster) {
+        List<NoteDto> encryptedNotes = repository.findAll().stream()
+                .filter(n -> n.encrypted)
+                .collect(Collectors.toList());
+
+        if (encryptedNotes.isEmpty()) {
+            return 0;
+        }
+
+        // 阶段一：全部解开，任何一篇失败就整体放弃
+        List<NoteDto> unlocked = new java.util.ArrayList<>();
+        List<String> failed = new java.util.ArrayList<>();
+        try {
+            for (NoteDto stub : encryptedNotes) {
+                NoteDto note = load(stub.id);
+                if (note == null || !note.encrypted) {
+                    continue;
+                }
+                try {
+                    NoteEncryptionService.unlock(note, oldMaster, true);
+                    unlocked.add(note);
+                } catch (Exception e) {
+                    logger.error("[NoteService] 主密码解不开笔记: {} - {}", note.key, e.getMessage());
+                    failed.add(note.key);
+                }
+            }
+
+            if (!failed.isEmpty()) {
+                throw new IllegalStateException(
+                        "以下笔记无法用当前主密码解开，主密码未做任何修改：" + String.join("、", failed));
+            }
+
+            // 阶段二：重新包裹并落盘。中途失败就把已写的几篇退回旧主密码，
+            // 避免它们的恢复通道指向一个即将被丢弃的密码
+            List<NoteDto> done = new java.util.ArrayList<>();
+            try {
+                for (NoteDto note : unlocked) {
+                    NoteEncryptionService.rewrapWithMaster(note, newMaster);
+                    save(note);
+                    done.add(note);
+                }
+            } catch (Exception e) {
+                logger.error("[NoteService] 重新包裹中途失败，开始回滚已写入的 {} 篇", done.size(), e);
+                for (NoteDto note : done) {
+                    try {
+                        NoteEncryptionService.rewrapWithMaster(note, oldMaster);
+                        save(note);
+                    } catch (Exception rollbackError) {
+                        logger.error("[NoteService] 回滚失败: {} - 这篇只能用笔记密码打开",
+                                note.key, rollbackError);
+                    }
+                }
+                throw new IllegalStateException(
+                        "重新包裹失败，已尝试回滚到原主密码，主密码未做修改：" + e.getMessage());
+            }
+
+            logger.info("[NoteService] 已用新主密码重新包裹 {} 篇私密笔记", done.size());
+            return done.size();
+        } catch (IllegalStateException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("重新包裹私密笔记失败: " + e.getMessage(), e);
+        } finally {
+            // 明文正文和 DEK 不留在内存里
+            for (NoteDto note : unlocked) {
+                NoteEncryptionService.lock(note);
+                note.bodyMd = null;
+            }
+        }
     }
 
     /**
@@ -95,9 +202,27 @@ public class NoteService {
             // 合并：使用索引的元数据 + 文件的正文
             indexData.bodyMd = fileData.bodyMd;
             indexData.frontMatter = fileData.frontMatter;
+            copyCryptoFields(fileData, indexData);
         }
 
         return indexData;
+    }
+
+    /**
+     * 加密参数只存在于文件的 front matter，数据库索引里没有。
+     * 合并时必须一并带过来，否则解锁时拿不到盐和包裹密钥。
+     */
+    private void copyCryptoFields(NoteDto from, NoteDto to) {
+        to.encrypted = from.encrypted;
+        to.cipherIv = from.cipherIv;
+        to.pwdSalt = from.pwdSalt;
+        to.pwdIv = from.pwdIv;
+        to.pwdWrappedDek = from.pwdWrappedDek;
+        to.masterSalt = from.masterSalt;
+        to.masterIv = from.masterIv;
+        to.masterWrappedDek = from.masterWrappedDek;
+        to.assets = from.assets;
+        to.locked = from.encrypted;
     }
 
     /**
@@ -114,6 +239,7 @@ public class NoteService {
         if (fileData != null) {
             indexData.bodyMd = fileData.bodyMd;
             indexData.frontMatter = fileData.frontMatter;
+            copyCryptoFields(fileData, indexData);
         }
 
         return indexData;

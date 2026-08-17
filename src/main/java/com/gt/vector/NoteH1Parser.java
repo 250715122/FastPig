@@ -14,6 +14,37 @@ public class NoteH1Parser {
     
     // 索引内容最大长度（正文截取）
     private static final int MAX_CONTENT_LENGTH = 300;
+
+    // 清洗前的正文截断长度，用来把单块的清洗开销限制成常数
+    private static final int PRECLEAN_LIMIT = MAX_CONTENT_LENGTH * 12;
+
+    /**
+     * Markdown 清洗规则。
+     *
+     * 必须预编译：String.replaceAll 每次调用都会重新编译正则，
+     * 而这里有十几条规则、每个 H1 块都要走一遍，长笔记下编译开销会盖过匹配开销。
+     * 刻意不加 MULTILINE，与历史行为保持一致，否则所有块的哈希都会变、触发全量重新向量化。
+     */
+    private static final Pattern[] CLEAN_PATTERNS = {
+            Pattern.compile("```[\\s\\S]*?```"),
+            Pattern.compile("`[^`]+`"),
+            Pattern.compile("\\[([^\\]]+)\\]\\([^)]+\\)"),
+            Pattern.compile("!\\[[^\\]]*\\]\\([^)]+\\)"),
+            Pattern.compile("^#{1,6}\\s+"),
+            Pattern.compile("\\*\\*([^*]+)\\*\\*"),
+            Pattern.compile("\\*([^*]+)\\*"),
+            Pattern.compile("__([^_]+)__"),
+            Pattern.compile("_([^_]+)_"),
+            Pattern.compile("^[\\s]*[-*+]\\s+"),
+            Pattern.compile("^[\\s]*\\d+\\.\\s+"),
+            Pattern.compile("^>\\s*"),
+            Pattern.compile("^[-*_]{3,}$"),
+            Pattern.compile("\\s+")
+    };
+
+    private static final String[] CLEAN_REPLACEMENTS = {
+            " ", " ", "$1", " ", "", "$1", "$1", "$1", "$1", "", "", "", "", " "
+    };
     
     /**
      * 解析笔记内容，提取所有 H1 块
@@ -50,6 +81,14 @@ public class NoteH1Parser {
             matches.add(match);
         }
         
+        // 同名标题在笔记内的出现序号，用于生成互不冲突且位置稳定的 docId
+        Map<String, Integer> titleCounter = new HashMap<>();
+        
+        // 行号增量推进。matches 按位置递增，只需在相邻两个 H1 之间数换行，
+        // 每个块都调 getLineNumber 从头扫的话整体是 O(正文长度 × 块数)
+        int scannedPos = 0;
+        int scannedLine = 1;
+        
         // 为每个 H1 提取正文内容
         for (int i = 0; i < matches.size(); i++) {
             H1Match current = matches.get(i);
@@ -68,22 +107,28 @@ public class NoteH1Parser {
                 body = content.substring(current.endPos, bodyEnd).trim();
             }
             
-            // 构建索引内容：描述 + H1 标题 + 正文前 N 字
-            String indexContent = buildIndexContent(noteDesc, current.title, body);
+            // 构建索引内容：H1 标题 + 正文前 N 字
+            String indexContent = buildIndexContent(current.title, body);
             
             H1Block block = new H1Block();
             block.noteKey = noteKey;
             block.noteDesc = noteDesc;
             block.h1Title = current.title;
             block.indexContent = indexContent;
-            block.lineNumber = getLineNumber(content, current.startPos);
+            while (scannedPos < current.startPos) {
+                if (content.charAt(scannedPos) == '\n') scannedLine++;
+                scannedPos++;
+            }
+            block.lineNumber = scannedLine;
+            block.dupIndex = titleCounter.merge(current.title, 1, Integer::sum) - 1;
+            block.blockHash = hashContent(indexContent);
             
             blocks.add(block);
         }
         
         // 如果没有 H1，将整篇文档作为一个块（但只有 indexContent 非空才添加）
         if (blocks.isEmpty()) {
-            String indexContent = buildIndexContent(noteDesc, "", content);
+            String indexContent = buildIndexContent("", content);
             // 只有 indexContent 非空才添加，避免生成无用的空索引
             if (indexContent != null && !indexContent.isEmpty()) {
                 H1Block block = new H1Block();
@@ -92,6 +137,8 @@ public class NoteH1Parser {
                 block.h1Title = ""; // 无标题
                 block.indexContent = indexContent;
                 block.lineNumber = 1;
+                block.dupIndex = 0;
+                block.blockHash = hashContent(indexContent);
                 blocks.add(block);
             }
         }
@@ -105,10 +152,32 @@ public class NoteH1Parser {
             noteNameBlock.h1Title = "__NOTE_NAME__";  // 特殊标记，避免 docId 冲突
             noteNameBlock.indexContent = noteKey;  // 只用笔记名做索引
             noteNameBlock.lineNumber = 1;
+            noteNameBlock.dupIndex = 0;
+            noteNameBlock.blockHash = hashContent(noteKey);
             blocks.add(0, noteNameBlock);  // 插入到列表开头
         }
         
         return blocks;
+    }
+    
+    /**
+     * 计算索引内容的哈希，作为块级差量比对的依据。
+     * 保存时逐块比对哈希，只有内容真正变化的块才需要重新 embed。
+     */
+    public static String hashContent(String content) {
+        String src = (content == null) ? "" : content;
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-1");
+            byte[] digest = md.digest(src.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+                sb.append(Character.forDigit(b & 0xF, 16));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return Integer.toHexString(src.hashCode());
+        }
     }
     
     /**
@@ -136,6 +205,39 @@ public class NoteH1Parser {
     }
     
     /**
+     * 求出给定偏移所在 H1 区块的范围：起点是该 H1 的行首，终点是下一个 H1 的行首。
+     * 与 parse() 共用同一套 H1 判定（含代码块屏蔽），保证预览分节与索引分块口径一致。
+     *
+     * @param content 笔记完整内容
+     * @param offset  光标偏移
+     * @return int[]{start, end}；内容中没有 H1 时返回整篇范围
+     */
+    public static int[] findSectionRange(String content, int offset) {
+        if (content == null || content.isEmpty()) {
+            return new int[]{0, 0};
+        }
+        int caret = Math.max(0, Math.min(offset, content.length()));
+
+        List<int[]> codeBlockRanges = findCodeBlockRanges(content);
+        Matcher matcher = H1_PATTERN.matcher(content);
+
+        int start = 0;
+        int end = content.length();
+        while (matcher.find()) {
+            if (isInsideCodeBlock(matcher.start(), codeBlockRanges)) {
+                continue;
+            }
+            if (matcher.start() <= caret) {
+                start = matcher.start();
+            } else {
+                end = matcher.start();
+                break;
+            }
+        }
+        return new int[]{start, end};
+    }
+
+    /**
      * 获取某偏移位置对应的行号（从 1 开始）
      */
     public static int getLineNumber(String content, int offset) {
@@ -153,12 +255,33 @@ public class NoteH1Parser {
     }
     
     /**
-     * 构建索引内容
-     * 只用 H1 标题做索引，支持模糊搜索
+     * 构建索引内容：H1 标题 + 正文前 MAX_CONTENT_LENGTH 字。
+     *
+     * 正文必须参与 embedding，否则"向量检索"实际只是在匹配标题字符串，
+     * 正文里写了但标题没提到的内容永远检索不到。
+     * 标题放在最前面，保证它在截断后的内容里始终占有权重。
      */
-    private static String buildIndexContent(String noteDesc, String h1Title, String body) {
-        // 只用 H1 标题做索引
-        return h1Title != null ? h1Title : "";
+    private static String buildIndexContent(String h1Title, String body) {
+        StringBuilder sb = new StringBuilder();
+        if (h1Title != null && !h1Title.isEmpty()) {
+            sb.append(h1Title);
+        }
+        
+        // 先截断再清洗。最终只保留 MAX_CONTENT_LENGTH 个字，
+        // 把整块正文（可能几十 KB）完整跑一遍正则再丢掉 99% 纯属浪费；
+        // 留出十几倍余量，足够覆盖清洗过程中被删掉的标记。
+        String source = body != null && body.length() > PRECLEAN_LIMIT
+                ? body.substring(0, PRECLEAN_LIMIT)
+                : body;
+        String cleanBody = cleanMarkdown(source);
+        if (!cleanBody.isEmpty()) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(cleanBody.length() > MAX_CONTENT_LENGTH
+                    ? cleanBody.substring(0, MAX_CONTENT_LENGTH)
+                    : cleanBody);
+        }
+        
+        return sb.toString().trim();
     }
     
     /**
@@ -168,39 +291,9 @@ public class NoteH1Parser {
         if (text == null) return "";
         
         String result = text;
-        
-        // 移除代码块
-        result = result.replaceAll("```[\\s\\S]*?```", " ");
-        result = result.replaceAll("`[^`]+`", " ");
-        
-        // 移除链接，保留文本
-        result = result.replaceAll("\\[([^\\]]+)\\]\\([^)]+\\)", "$1");
-        
-        // 移除图片
-        result = result.replaceAll("!\\[[^\\]]*\\]\\([^)]+\\)", " ");
-        
-        // 移除标题标记（但保留标题文本）
-        result = result.replaceAll("^#{1,6}\\s+", "");
-        
-        // 移除粗体/斜体标记
-        result = result.replaceAll("\\*\\*([^*]+)\\*\\*", "$1");
-        result = result.replaceAll("\\*([^*]+)\\*", "$1");
-        result = result.replaceAll("__([^_]+)__", "$1");
-        result = result.replaceAll("_([^_]+)_", "$1");
-        
-        // 移除列表标记
-        result = result.replaceAll("^[\\s]*[-*+]\\s+", "");
-        result = result.replaceAll("^[\\s]*\\d+\\.\\s+", "");
-        
-        // 移除引用标记
-        result = result.replaceAll("^>\\s*", "");
-        
-        // 移除水平线
-        result = result.replaceAll("^[-*_]{3,}$", "");
-        
-        // 合并多个空白字符
-        result = result.replaceAll("\\s+", " ");
-        
+        for (int i = 0; i < CLEAN_PATTERNS.length; i++) {
+            result = CLEAN_PATTERNS[i].matcher(result).replaceAll(CLEAN_REPLACEMENTS[i]);
+        }
         return result.trim();
     }
     
@@ -281,11 +374,13 @@ public class NoteH1Parser {
         public String h1Title;    // H1 标题
         public String indexContent; // 索引内容
         public int lineNumber;    // 行号
+        public int dupIndex;      // 同名标题在笔记内的出现序号（0 起）
+        public String blockHash;  // indexContent 的哈希，差量比对用
         
         @Override
         public String toString() {
-            return String.format("H1Block{noteKey='%s', noteDesc='%s', h1Title='%s', line=%d}", 
-                noteKey, noteDesc, h1Title, lineNumber);
+            return String.format("H1Block{noteKey='%s', noteDesc='%s', h1Title='%s', dup=%d, line=%d}", 
+                noteKey, noteDesc, h1Title, dupIndex, lineNumber);
         }
     }
 }

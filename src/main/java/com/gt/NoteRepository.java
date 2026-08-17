@@ -44,6 +44,8 @@ public class NoteRepository {
             // 添加新字段（如果不存在）
             addColumnIfNotExists(conn, "folder_path", "TEXT");
             addColumnIfNotExists(conn, "content_hash", "TEXT");
+            // 私密笔记标记：全文搜索要据此排除加密笔记，避免通过 body_md 残留泄漏内容
+            addColumnIfNotExists(conn, "encrypted", "INTEGER DEFAULT 0");
             
             // 创建索引
             st.execute("CREATE INDEX IF NOT EXISTS idx_snippets_key ON snippets(key)");
@@ -132,11 +134,12 @@ public class NoteRepository {
      * 用于新的文件存储模式
      */
     public void saveIndex(NoteDto note) {
-        String sql = "INSERT INTO snippets(id, key, title, desc, tags_json, created_at, updated_at, version, deleted, folder_path, content_hash)\n" +
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?)\n" +
+        String sql = "INSERT INTO snippets(id, key, title, desc, tags_json, created_at, updated_at, version, deleted, folder_path, content_hash, encrypted)\n" +
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)\n" +
                 "ON CONFLICT(id) DO UPDATE SET key=excluded.key, title=excluded.title, desc=excluded.desc, " +
                 "tags_json=excluded.tags_json, updated_at=excluded.updated_at, version=excluded.version, " +
-                "deleted=excluded.deleted, folder_path=excluded.folder_path, content_hash=excluded.content_hash";
+                "deleted=excluded.deleted, folder_path=excluded.folder_path, content_hash=excluded.content_hash, " +
+                "encrypted=excluded.encrypted";
         try (Connection conn = getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, note.id);
             ps.setString(2, note.key);
@@ -149,11 +152,12 @@ public class NoteRepository {
             ps.setInt(9, note.deleted ? 1 : 0);
             ps.setString(10, note.folderPath);
             ps.setString(11, note.contentHash);
+            ps.setInt(12, note.encrypted ? 1 : 0);
             ps.executeUpdate();
         } catch (SQLException e) {
             if (e.getMessage() != null && e.getMessage().contains("UNIQUE constraint failed: snippets.key")) {
                 String up = "UPDATE snippets SET title=?, desc=?, tags_json=?, updated_at=?, version=?, " +
-                        "deleted=?, folder_path=?, content_hash=? WHERE key=?";
+                        "deleted=?, folder_path=?, content_hash=?, encrypted=? WHERE key=?";
                 try (Connection c2 = getConnection(); PreparedStatement ps2 = c2.prepareStatement(up)) {
                     ps2.setString(1, note.title);
                     ps2.setString(2, note.desc);
@@ -163,7 +167,8 @@ public class NoteRepository {
                     ps2.setInt(6, note.deleted ? 1 : 0);
                     ps2.setString(7, note.folderPath);
                     ps2.setString(8, note.contentHash);
-                    ps2.setString(9, note.key);
+                    ps2.setInt(9, note.encrypted ? 1 : 0);
+                    ps2.setString(10, note.key);
                     ps2.executeUpdate();
                     return;
                 } catch (SQLException ex) {
@@ -176,8 +181,11 @@ public class NoteRepository {
 
     public List<NoteDto> searchByKeyOrText(String query, int limit) {
         String like = "%" + query.toLowerCase() + "%";
+        // 私密笔记只允许按 key/desc/title 命中，绝不用 body_md 参与匹配：
+        // 历史迁移可能在 body_md 里留有明文，不排除就等于绕过了加密
         String sql = "SELECT * FROM snippets WHERE deleted=0 AND (\n" +
-                "LOWER(key) LIKE ? OR LOWER(desc) LIKE ? OR LOWER(title) LIKE ? OR LOWER(tags_json) LIKE ? OR LOWER(body_md) LIKE ?\n" +
+                "LOWER(key) LIKE ? OR LOWER(desc) LIKE ? OR LOWER(title) LIKE ? OR LOWER(tags_json) LIKE ? " +
+                "OR (COALESCE(encrypted,0)=0 AND LOWER(body_md) LIKE ?)\n" +
                 ") ORDER BY\n" +
                 "CASE WHEN LOWER(key)=? THEN 0 WHEN LOWER(key) LIKE ? THEN 1 ELSE 2 END, updated_at DESC\n" +
                 "LIMIT ?";
@@ -381,6 +389,16 @@ public class NoteRepository {
             n.contentHash = rs.getString("content_hash");
         } catch (SQLException e) {
             n.contentHash = null;
+        }
+        try {
+            n.encrypted = rs.getInt("encrypted") == 1;
+        } catch (SQLException e) {
+            n.encrypted = false;
+        }
+        // 私密笔记的正文只以密文存在于文件里，库里读到的任何 body_md 都是历史残留，不可信
+        if (n.encrypted) {
+            n.bodyMd = null;
+            n.locked = true;
         }
         
         return n;
