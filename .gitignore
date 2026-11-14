@@ -77,3 +77,13 @@ convert-logo-to-ico.ps1
 *SYNC*.md
 *SETUP*.md
 *CONFIG*.md
+
+# 个人知识与速查数据（遗留文件含真实凭据，禁止公开）
+resources/*.txt
+src/main/resources/*.txt
+
+# 内部设计/需求/实施文档
+docs/
+
+# 同步元数据备份
+*.bak
