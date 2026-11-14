@@ -1,5 +1,7 @@
 package com.gt;
 
+import com.gt.config.ConfigKeys;
+
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
@@ -36,7 +38,6 @@ public class ToastNotification extends JWindow {
     private static final int TOAST_WIDTH = 360;
     private static final int TOAST_HEIGHT = 56;
     private static final int MARGIN = 18;
-    private static final int DURATION = 2800; // 停留时长（不含入场动画）
 
     private static final int ENTER_MS = 180;
     private static final int EXIT_MS = 160;
@@ -135,8 +136,8 @@ public class ToastNotification extends JWindow {
             }
         });
         
-        // 自动隐藏：在入场动画结束后启动
-        hideTimer = new Timer(DURATION, e -> beginHide());
+        // 自动隐藏：在入场动画结束后启动，停留时长见 ui.toast.duration.ms
+        hideTimer = new Timer(AppConfig.getInstance().getInt(ConfigKeys.UI_TOAST_DURATION_MS), e -> beginHide());
         hideTimer.setRepeats(false);
     }
     

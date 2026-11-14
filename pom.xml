@@ -19,11 +19,11 @@
     </properties>
 
 	<dependencies>
-		<!-- Junit 4.x -->
+		<!-- JUnit 5 -->
 		<dependency>
-			<groupId>junit</groupId>
-			<artifactId>junit</artifactId>
-			<version>4.10</version>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<version>5.10.2</version>
 			<scope>test</scope>
 		</dependency>
 
@@ -129,7 +129,6 @@
 	
   <build>
     <sourceDirectory>src/main/java</sourceDirectory>
-    <testSourceDirectory>src/main/test</testSourceDirectory>
 	<defaultGoal>compile</defaultGoal>
 	
     <plugins>
@@ -143,6 +142,13 @@
           <target>21</target>
           <encoding>UTF-8</encoding>
         </configuration>
+      </plugin>
+
+      <!-- 单元测试：只跑 JUnit 5，main() 式旧测试不纳入 -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
       </plugin>
       
       <!-- 资源插件，确保DLL文件被复制 -->

@@ -1,5 +1,8 @@
 package com.gt.vector;
 
+import com.gt.AppConfig;
+import com.gt.config.ConfigKeys;
+
 import javax.swing.*;
 import java.awt.*;
 import java.nio.file.*;
@@ -10,7 +13,6 @@ import java.nio.file.*;
 public class ModelManager {
     
     private static final String MODEL_DIR = "models";
-    private static final String MODEL_FILE = "bge-small-zh-v1.5.onnx";
     private static final String VOCAB_FILE = "vocab.txt";
     
     private static boolean downloadInProgress = false;
@@ -20,7 +22,7 @@ public class ModelManager {
      */
     public static boolean isModelDownloaded() {
         Path modelDir = Paths.get(System.getProperty("user.dir"), MODEL_DIR);
-        return Files.exists(modelDir.resolve(MODEL_FILE)) 
+        return Files.exists(modelDir.resolve(AppConfig.getInstance().getString(ConfigKeys.MODEL_FILE)))
             && Files.exists(modelDir.resolve(VOCAB_FILE));
     }
     

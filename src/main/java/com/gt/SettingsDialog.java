@@ -1,9 +1,16 @@
 package com.gt;
 
+import com.gt.config.ConfigKeys;
+import com.gt.vector.VectorSearchManager;
+
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.KeyEvent;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 设置对话框
@@ -17,7 +24,9 @@ public class SettingsDialog extends JDialog {
     private final JPanel contentPanel;
     
     // 左侧导航列表
-    private final String[] categories = {"云同步", "编辑器", "界面", "安全", "快捷键", "关于"};
+    private final String[] categories = {
+        "云同步", "编辑器", "界面", "安全", "快捷键", "全局热键", "检索", "索引", "知识库", "关于"
+    };
     private JList<String> categoryList;
     
     // 配置面板
@@ -27,6 +36,13 @@ public class SettingsDialog extends JDialog {
     private SecurityPanel securityPanel;
     private ShortcutsPanel shortcutsPanel;
     private AboutPanel aboutPanel;
+    
+    // 由 ConfigKeys 自动生成的面板
+    private final List<ConfigFormPanel> formPanels = new ArrayList<>();
+    private ConfigFormPanel hotkeyPanel;
+    private ConfigFormPanel searchPanel;
+    private ConfigFormPanel indexPanel;
+    private ConfigFormPanel kbPanel;
     
     // 底部按钮
     private JButton saveButton;
@@ -99,13 +115,17 @@ public class SettingsDialog extends JDialog {
                 }
                 
                 // 添加图标
-                String icon = switch (index) {
-                    case 0 -> "☁";
-                    case 1 -> "✏";
-                    case 2 -> "🎨";
-                    case 3 -> "🔒";
-                    case 4 -> "⌨";
-                    case 5 -> "ℹ";
+                String icon = switch (String.valueOf(value)) {
+                    case "云同步" -> "☁";
+                    case "编辑器" -> "✏";
+                    case "界面" -> "🎨";
+                    case "安全" -> "🔒";
+                    case "快捷键" -> "⌨";
+                    case "全局热键" -> "🌐";
+                    case "检索" -> "🔍";
+                    case "索引" -> "🗂";
+                    case "知识库" -> "📚";
+                    case "关于" -> "ℹ";
                     default -> "";
                 };
                 label.setText(" " + icon + "  " + value);
@@ -122,12 +142,25 @@ public class SettingsDialog extends JDialog {
         shortcutsPanel = new ShortcutsPanel(this);
         aboutPanel = new AboutPanel(this);
         
+        hotkeyPanel = new ConfigFormPanel(this, ConfigKeys.Category.HOTKEY, "🌐 全局热键");
+        searchPanel = new ConfigFormPanel(this, ConfigKeys.Category.SEARCH, "🔍 检索配置");
+        indexPanel = new ConfigFormPanel(this, ConfigKeys.Category.INDEX, "🗂 索引配置");
+        kbPanel = new ConfigFormPanel(this, ConfigKeys.Category.KB, "📚 知识库配置");
+        formPanels.add(hotkeyPanel);
+        formPanels.add(searchPanel);
+        formPanels.add(indexPanel);
+        formPanels.add(kbPanel);
+        
         // 添加到卡片布局
         contentPanel.add(cloudSyncPanel, "云同步");
         contentPanel.add(editorPanel, "编辑器");
         contentPanel.add(uiPanel, "界面");
         contentPanel.add(securityPanel, "安全");
         contentPanel.add(shortcutsPanel, "快捷键");
+        contentPanel.add(hotkeyPanel, "全局热键");
+        contentPanel.add(searchPanel, "检索");
+        contentPanel.add(indexPanel, "索引");
+        contentPanel.add(kbPanel, "知识库");
         contentPanel.add(aboutPanel, "关于");
         
         // 底部按钮
@@ -219,6 +252,9 @@ public class SettingsDialog extends JDialog {
         cloudSyncPanel.loadConfig();
         editorPanel.loadConfig();
         uiPanel.loadConfig();
+        for (ConfigFormPanel panel : formPanels) {
+            panel.loadConfig();
+        }
     }
     
     /**
@@ -239,11 +275,27 @@ public class SettingsDialog extends JDialog {
                 categoryList.setSelectedIndex(2);
                 return false;
             }
+            for (int i = 0; i < formPanels.size(); i++) {
+                if (!formPanels.get(i).validateConfig()) {
+                    categoryList.setSelectedIndex(5 + i);
+                    return false;
+                }
+            }
+            
+            boolean needReindex = false;
+            boolean hotkeyChanged = false;
+            for (ConfigFormPanel panel : formPanels) {
+                needReindex |= panel.hasReindexChanges();
+                hotkeyChanged |= panel.hasHotkeyChanges();
+            }
             
             // 保存配置
             cloudSyncPanel.saveConfig();
             editorPanel.saveConfig();
             uiPanel.saveConfig();
+            for (ConfigFormPanel panel : formPanels) {
+                panel.saveConfig();
+            }
             
             // 持久化到文件
             config.save();
@@ -251,11 +303,34 @@ public class SettingsDialog extends JDialog {
             // 应用配置
             applyConfiguration();
             
+            if (hotkeyChanged) {
+                ToastNotification.showSuccess(parent, "热键已保存，重启后生效");
+            }
+            if (needReindex) {
+                promptRebuildIndex();
+            }
+            
             return true;
         } catch (Exception e) {
             ToastNotification.showError(parent, "保存配置失败: " + e.getMessage());
             return false;
         }
+    }
+    
+    /**
+     * 改了影响索引内容的项后，旧索引里的摘要/向量仍是按旧参数生成的，
+     * 差量比对只看 blockHash，不会自动重算，必须显式全量重建。
+     */
+    private void promptRebuildIndex() {
+        int choice = JOptionPane.showConfirmDialog(this,
+            "此修改需要重建索引才能完全生效，现在重建？\n（重建期间检索结果可能不完整）",
+            "重建向量索引", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (choice != JOptionPane.YES_OPTION) {
+            return;
+        }
+        Path notesDir = Paths.get(System.getProperty("user.dir"), "notes");
+        VectorSearchManager.getInstance().rebuildAllIndex(notesDir, (current, total) ->
+            UnifiedNoteAppFrame.updateStartupStatus("正在重建向量索引 " + current + "/" + total + "..."));
     }
     
     /**
@@ -341,6 +416,10 @@ public class SettingsDialog extends JDialog {
         if (aboutPanel != null) {
             aboutPanel.setBackground(UIColors.BG_PRIMARY);
             themeManager.applyTheme(aboutPanel);
+        }
+        for (ConfigFormPanel panel : formPanels) {
+            panel.setBackground(UIColors.BG_PRIMARY);
+            themeManager.applyTheme(panel);
         }
         
         // 重绘对话框

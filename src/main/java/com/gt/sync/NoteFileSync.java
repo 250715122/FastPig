@@ -4,6 +4,7 @@ import com.gt.NoteDto;
 import com.gt.cloud.CloudFileInfo;
 import com.gt.cloud.CloudStorageFactory;
 import com.gt.cloud.CloudStorageProvider;
+import com.gt.kb.Taxonomy;
 import com.gt.service.NoteService;
 import com.gt.storage.NoteFileStorage;
 import com.gt.vector.VectorSearchManager;
@@ -34,13 +35,20 @@ public class NoteFileSync {
     private static final Logger logger = LogManager.getLogger(NoteFileSync.class);
     private static NoteFileSync instance;
 
+    // WebDAV 的修改时间只精确到秒，双向比较都留这个容差，否则同一份配置会来回传
+    private static final long MTIME_TOLERANCE_MS = 2000L;
+
     private final NoteFileStorage fileStorage;
     private final CloudStorageProvider cloudProvider;
     private NoteService noteService;
 
     public NoteFileSync(NoteFileStorage fileStorage) {
+        this(fileStorage, CloudStorageFactory.getProvider());
+    }
+
+    NoteFileSync(NoteFileStorage fileStorage, CloudStorageProvider cloudProvider) {
         this.fileStorage = fileStorage;
-        this.cloudProvider = CloudStorageFactory.getProvider();
+        this.cloudProvider = cloudProvider;
     }
 
     public static synchronized NoteFileSync getInstance() {
@@ -87,7 +95,7 @@ public class NoteFileSync {
             try {
                 List<CloudFileInfo> cloudFiles = cloudProvider.listFiles("");
                 for (CloudFileInfo f : cloudFiles) {
-                    if (f.isDirectory() && !f.getName().startsWith(".")) {
+                    if (f.isDirectory() && isNoteFolderName(f.getName())) {
                         cloudFolders.add(f.getName());
                     }
                 }
@@ -108,7 +116,7 @@ public class NoteFileSync {
                 for (Path folderPath : stream) {
                     if (!Files.isDirectory(folderPath)) continue;
                     String folderName = folderPath.getFileName().toString();
-                    if (folderName.startsWith(".")) continue;
+                    if (!isNoteFolderName(folderName)) continue;
                     
                     if (shouldUpload(folderPath, lastSyncTime, syncMeta, cloudFolders)) {
                         toUpload.add(folderPath);
@@ -159,6 +167,11 @@ public class NoteFileSync {
             // 处理已删除的笔记：同步删除云端
             int deletedCount = syncDeletedNotesToCloud(notesDir, syncMeta);
 
+            // 知识库配置（词表等）走独立通道，失败不影响笔记同步结果
+            if (!syncKbConfigToCloud()) {
+                logger.warn("[NoteFileSync] 知识库配置上传未完成");
+            }
+
             // 保存元数据：
             // - 无论整体是否成功，都保存已成功上传的条目，避免下次重复上传
             // - 只有整体成功时才更新 lastSyncTime
@@ -205,7 +218,7 @@ public class NoteFileSync {
             for (Path folderPath : stream) {
                 if (!Files.isDirectory(folderPath)) continue;
                 String folderName = folderPath.getFileName().toString();
-                if (folderName.startsWith(".")) continue;
+                if (!isNoteFolderName(folderName)) continue;
                 
                 // 检查该笔记是否被标记为已删除
                 Path noteFile = folderPath.resolve("note.md");
@@ -261,6 +274,96 @@ public class NoteFileSync {
         }
         
         return deletedCount;
+    }
+    
+    /**
+     * 判断目录名是否代表一篇笔记。
+     * 以 . 开头的是隐藏/元数据目录，以 _ 开头的是知识库内部数据（如 _kb 内容配置），
+     * 两者都不参与笔记的上传、下载与删除。
+     */
+    private static boolean isNoteFolderName(String name) {
+        return !name.startsWith(".") && !name.startsWith("_");
+    }
+
+    /**
+     * 上传 notes/_kb 下的知识库配置（词表等）。
+     * 这些文件没有 note.md，也没有版本号，只能按修改时间比较，故走独立通道。
+     */
+    private boolean syncKbConfigToCloud() {
+        Path kbDir = fileStorage.getNotesDir().resolve(Taxonomy.KB_DIR);
+        if (!Files.isDirectory(kbDir)) {
+            return true;
+        }
+        try {
+            Map<String, Long> cloudTimes = cloudKbFileTimes();
+            List<Path> files;
+            try (Stream<Path> walk = Files.walk(kbDir)) {
+                files = walk.filter(Files::isRegularFile).toList();
+            }
+            boolean dirCreated = false;
+            boolean ok = true;
+            for (Path file : files) {
+                String relative = kbDir.relativize(file).toString().replace("\\", "/");
+                Long cloudTime = cloudTimes.get(relative);
+                long localTime = Files.getLastModifiedTime(file).toMillis();
+                if (cloudTime != null && localTime <= cloudTime + MTIME_TOLERANCE_MS) {
+                    continue;
+                }
+                if (!dirCreated) {
+                    cloudProvider.createDirectory(Taxonomy.KB_DIR);
+                    dirCreated = true;
+                }
+                String remotePath = Taxonomy.KB_DIR + "/" + relative;
+                if (cloudProvider.upload(remotePath, Files.readAllBytes(file))) {
+                    logger.info("[NoteFileSync] 已上传知识库配置: {}", remotePath);
+                } else {
+                    logger.error("[NoteFileSync] 上传知识库配置失败: {}", remotePath);
+                    ok = false;
+                }
+            }
+            return ok;
+        } catch (Exception e) {
+            logger.error("[NoteFileSync] 上传知识库配置失败: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /** 下载云端 notes/_kb 配置，本地更新的不动。 */
+    private boolean syncKbConfigFromCloud() {
+        Path kbDir = fileStorage.getNotesDir().resolve(Taxonomy.KB_DIR);
+        try {
+            for (CloudFileInfo info : cloudProvider.listFilesRecursive(Taxonomy.KB_DIR)) {
+                if (info.isDirectory()) {
+                    continue;
+                }
+                String relative = info.getPath().substring(Taxonomy.KB_DIR.length() + 1);
+                Path local = kbDir.resolve(relative);
+                if (Files.exists(local)
+                        && Files.getLastModifiedTime(local).toMillis() + MTIME_TOLERANCE_MS >= info.getLastModified()) {
+                    continue;
+                }
+                downloadFile(info.getPath(), local);
+            }
+            return true;
+        } catch (Exception e) {
+            logger.error("[NoteFileSync] 下载知识库配置失败: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /** 云端 _kb 文件修改时间，key 为相对 _kb 的路径；目录不存在时返回空表。 */
+    private Map<String, Long> cloudKbFileTimes() {
+        Map<String, Long> times = new HashMap<>();
+        try {
+            for (CloudFileInfo info : cloudProvider.listFilesRecursive(Taxonomy.KB_DIR)) {
+                if (!info.isDirectory()) {
+                    times.put(info.getPath().substring(Taxonomy.KB_DIR.length() + 1), info.getLastModified());
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("[NoteFileSync] 读取云端知识库配置列表失败: {}", e.getMessage());
+        }
+        return times;
     }
     
     /**
@@ -336,6 +439,11 @@ public class NoteFileSync {
             SyncMetadata localMeta = SyncMetadata.load(notesDir);
             boolean metaChanged = normalizeSyncMeta(localMeta);
 
+            // 词表先落地，后续分类与治理才有依据
+            if (!syncKbConfigFromCloud()) {
+                logger.warn("[NoteFileSync] 知识库配置下载未完成");
+            }
+
             // 尝试下载云端的 .sync_meta.json 进行快速版本比较
             SyncMetadata cloudMeta = downloadCloudMeta();
             boolean useVersionCompare = (cloudMeta != null && !cloudMeta.getFiles().isEmpty());
@@ -348,7 +456,7 @@ public class NoteFileSync {
             List<DownloadTask> toDownload = new ArrayList<>();
             AtomicInteger skippedCount = new AtomicInteger(0);
 
-            int totalFolders = (int) cloudFolders.stream().filter(f -> f.isDirectory() && !f.getName().startsWith(".")).count();
+            int totalFolders = (int) cloudFolders.stream().filter(f -> f.isDirectory() && isNoteFolderName(f.getName())).count();
             int checkCount = 0;
             
             if (useVersionCompare) {
@@ -363,7 +471,7 @@ public class NoteFileSync {
                 }
 
                 String folderName = cloudFolder.getName();
-                if (folderName.startsWith(".")) {
+                if (!isNoteFolderName(folderName)) {
                     continue;
                 }
 
@@ -554,14 +662,14 @@ public class NoteFileSync {
         try {
             // 检查云端是否有数据
             List<CloudFileInfo> cloudFolders = cloudProvider.listFiles("");
-            int cloudCount = (int) cloudFolders.stream().filter(f -> f.isDirectory() && !f.getName().startsWith(".")).count();
+            int cloudCount = (int) cloudFolders.stream().filter(f -> f.isDirectory() && isNoteFolderName(f.getName())).count();
 
             // 检查本地是否有数据
             Path notesDir = fileStorage.getNotesDir();
             int localCount = 0;
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(notesDir)) {
                 for (Path path : stream) {
-                    if (Files.isDirectory(path) && !path.getFileName().toString().startsWith(".")) {
+                    if (Files.isDirectory(path) && isNoteFolderName(path.getFileName().toString())) {
                         localCount++;
                     }
                 }
@@ -1004,11 +1112,18 @@ public class NoteFileSync {
         byte[] data = cloudProvider.download(remotePath);
         if (data != null) {
             // 确保父目录存在
-            Path parent = localPath.getParent();
-            if (parent != null && !Files.exists(parent)) {
+            Path parent = localPath.toAbsolutePath().getParent();
+            if (!Files.exists(parent)) {
                 Files.createDirectories(parent);
             }
-            Files.write(localPath, data);
+            // 先写临时文件再原子替换：中断时不会留下半个 note.md 或半个词表
+            Path tmp = Files.createTempFile(parent, localPath.getFileName().toString(), ".tmp");
+            try {
+                Files.write(tmp, data);
+                Files.move(tmp, localPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } finally {
+                Files.deleteIfExists(tmp);
+            }
             logger.info("[NoteFileSync] 已下载: " + localPath.getFileName());
         }
     }

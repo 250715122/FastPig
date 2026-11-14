@@ -448,6 +448,12 @@ public class NoteService {
                         continue;
                     }
                     
+                    // 跳过知识库内部目录（以 _ 开头，如 _kb 内容配置）：
+                    // 它们不在数据库里，按孤立笔记处理会被直接删掉
+                    if (folderName.startsWith("_")) {
+                        continue;
+                    }
+                    
                     // 检查数据库中是否存在
                     if (!dbKeys.contains(folderName)) {
                         logger.info("[NoteService] 发现孤立笔记: {}", folderName);

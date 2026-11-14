@@ -30,14 +30,15 @@ public class ShortcutsPanel extends JPanel {
         
         // 快捷键表格
         String[] columnNames = {"功能", "快捷键", "说明"};
+        AppConfig config = AppConfig.getInstance();
         Object[][] data = {
-            // 全局热键
-            {"显示/恢复窗口", "Alt+N", "将窗口恢复到正常大小"},
-            {"最大化窗口", "Alt+M", "最大化应用窗口"},
-            {"最小化窗口", "Alt+L", "最小化应用窗口"},
-            {"退出程序", "Alt+Q", "同步数据并退出"},
-            {"上传到云端", "Alt+S", "将本地数据库上传到云端"},
-            {"从云端下载", "Alt+U", "从云端下载并覆盖本地数据库"},
+            // 全局热键（字母可在「全局热键」分类中修改）
+            {"显示/恢复窗口", config.getString(com.gt.config.ConfigKeys.HOTKEY_SHOW), "将窗口恢复到正常大小"},
+            {"最大化窗口", config.getString(com.gt.config.ConfigKeys.HOTKEY_MAX), "最大化应用窗口"},
+            {"最小化窗口", config.getString(com.gt.config.ConfigKeys.HOTKEY_MIN), "最小化应用窗口"},
+            {"退出程序", config.getString(com.gt.config.ConfigKeys.HOTKEY_EXIT), "同步数据并退出"},
+            {"上传到云端", config.getString(com.gt.config.ConfigKeys.HOTKEY_SYNC), "将本地数据库上传到云端"},
+            {"从云端下载", config.getString(com.gt.config.ConfigKeys.HOTKEY_PULL), "从云端下载并覆盖本地数据库"},
             
             // 编辑功能
             {"保存", "Ctrl+S", "手动保存当前笔记"},

@@ -1,5 +1,7 @@
 package com.gt;
 
+import com.gt.config.ConfigKeys;
+
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -24,6 +26,8 @@ public class AppConfig {
     private static final String B64_PREFIX = "b64:";
     
     // ===== 配置项常量 =====
+    // 键名与默认值统一由 com.gt.config.ConfigKeys 定义，这里保留常量名供现有调用方使用。
+    // 无默认值的凭据类键（账号、密码、主密码盐）不进 ConfigKeys，避免被写入默认值。
     
     // 云同步配置
     public static final String CLOUD_PROVIDER = "cloud.provider";
@@ -56,35 +60,21 @@ public class AppConfig {
     public static final String MASTER_PASSWORD_VERIFIER = "security.master.verifier";
     
     // ===== 默认值 =====
-    
+
     private static final Properties DEFAULTS = new Properties();
     static {
-        // 云同步默认值
-        DEFAULTS.setProperty(CLOUD_PROVIDER, "nutstore");
-        DEFAULTS.setProperty(NUTSTORE_WEBDAV_BASE, "https://dav.jianguoyun.com/dav/");
-        DEFAULTS.setProperty(NUTSTORE_SYNC_PATH, "FastPig/notes");
-        
-        // 编辑器默认值
-        DEFAULTS.setProperty(EDITOR_FONT_NAME, "Consolas");
-        DEFAULTS.setProperty(EDITOR_FONT_SIZE, "14");
-        DEFAULTS.setProperty(EDITOR_LINE_HEIGHT, "1.6");
-        DEFAULTS.setProperty(EDITOR_TAB_SIZE, "4");
-        DEFAULTS.setProperty(EDITOR_AUTOSAVE_INTERVAL, "10");
-        
-        // 界面默认值
-        DEFAULTS.setProperty(UI_THEME, "light");
-        DEFAULTS.setProperty(UI_WINDOW_WIDTH, "1100");
-        DEFAULTS.setProperty(UI_WINDOW_HEIGHT, "720");
-        DEFAULTS.setProperty(UI_START_MAXIMIZED, "false");
-        
-        // 行为默认值
-        DEFAULTS.setProperty(BEHAVIOR_SYNC_ON_START, "true");
-        DEFAULTS.setProperty(BEHAVIOR_SYNC_ON_EXIT, "true");
-        DEFAULTS.setProperty(SYNC_AUTO_UPLOAD_INTERVAL, "30"); // 默认30分钟
+        for (com.gt.config.ConfigKeys k : com.gt.config.ConfigKeys.values()) {
+            DEFAULTS.setProperty(k.key, String.valueOf(k.def));
+        }
     }
-    
+
     private AppConfig() {
-        this.configFilePath = System.getProperty("user.dir") + File.separator + "config.properties";
+        this(System.getProperty("user.dir") + File.separator + "config.properties");
+    }
+
+    /** 指定配置文件路径，供测试与多实例场景使用，不触碰真实 config.properties。 */
+    public AppConfig(String configFilePath) {
+        this.configFilePath = configFilePath;
         this.properties = new Properties(DEFAULTS);
         load();
     }
@@ -217,6 +207,84 @@ public class AppConfig {
         return Boolean.parseBoolean(value);
     }
     
+    // ===== 类型化读取（ConfigKeys）=====
+    // 非法值或越界一律回退默认值并记日志，避免一个错配置把检索/同步打挂。
+
+    private String raw(ConfigKeys k) {
+        String v = properties.getProperty(k.key);
+        return v == null ? String.valueOf(k.def) : v;
+    }
+
+    public int getInt(ConfigKeys k) {
+        String v = raw(k).trim();
+        try {
+            int parsed = Integer.parseInt(v);
+            if (!k.inRange(parsed)) {
+                logger.warn("配置项 {} 的值 {} 超出范围 [{}, {}]，使用默认值 {}", k.key, parsed, k.min, k.max, k.def);
+                return (Integer) k.def;
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            logger.warn("配置项 {} 的值 '{}' 不是有效整数，使用默认值 {}", k.key, v, k.def);
+            return (Integer) k.def;
+        }
+    }
+
+    public long getLong(ConfigKeys k) {
+        String v = raw(k).trim();
+        try {
+            long parsed = Long.parseLong(v);
+            if (!k.inRange(parsed)) {
+                logger.warn("配置项 {} 的值 {} 超出范围 [{}, {}]，使用默认值 {}", k.key, parsed, k.min, k.max, k.def);
+                return ((Number) k.def).longValue();
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            logger.warn("配置项 {} 的值 '{}' 不是有效整数，使用默认值 {}", k.key, v, k.def);
+            return ((Number) k.def).longValue();
+        }
+    }
+
+    public double getDouble(ConfigKeys k) {
+        String v = raw(k).trim();
+        try {
+            double parsed = Double.parseDouble(v);
+            if (!k.inRange(parsed)) {
+                logger.warn("配置项 {} 的值 {} 超出范围 [{}, {}]，使用默认值 {}", k.key, parsed, k.min, k.max, k.def);
+                return ((Number) k.def).doubleValue();
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            logger.warn("配置项 {} 的值 '{}' 不是有效浮点数，使用默认值 {}", k.key, v, k.def);
+            return ((Number) k.def).doubleValue();
+        }
+    }
+
+    public boolean getBoolean(ConfigKeys k) {
+        String v = raw(k).trim();
+        if ("true".equalsIgnoreCase(v)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(v)) {
+            return false;
+        }
+        logger.warn("配置项 {} 的值 '{}' 不是有效布尔值，使用默认值 {}", k.key, v, k.def);
+        return (Boolean) k.def;
+    }
+
+    public String getString(ConfigKeys k) {
+        return raw(k);
+    }
+
+    /** 供设置面板写入；合法性由读取侧兜底，面板自身也先用 ConfigKeys.inRange 校验。 */
+    public void set(ConfigKeys k, String value) {
+        if (value == null) {
+            properties.remove(k.key);
+        } else {
+            properties.setProperty(k.key, value);
+        }
+    }
+
     /**
      * 设置字符串配置
      */

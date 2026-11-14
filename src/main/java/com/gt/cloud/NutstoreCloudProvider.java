@@ -3,6 +3,8 @@ package com.gt.cloud;
 import com.github.sardine.DavResource;
 import com.github.sardine.Sardine;
 import com.github.sardine.SardineFactory;
+import com.gt.AppConfig;
+import com.gt.config.ConfigKeys;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -34,16 +36,9 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
     private final String syncPath;
     private final String syncRootUrl;
 
-    // 默认 WebDAV 地址
-    private static final String DEFAULT_WEBDAV_BASE = "https://dav.jianguoyun.com/dav/";
-    private static final String DEFAULT_SYNC_PATH = "FastPig/notes";
-
     private static final String B64_PREFIX = "b64:";
     
-    // 请求限流：避免触发坚果云安全限制
-    // 坚果云免费版限制较严格，需要较长间隔
-    private static final long REQUEST_INTERVAL_MS = 1000; // 请求间隔 1 秒
-    private static final long RETRY_WAIT_MS = 30000; // 限流后等待 30 秒
+    // 请求限流：避免触发坚果云安全限制。坚果云免费版限制较严格，需要较长间隔。
     private long lastRequestTime = 0;
     
     // 目录缓存：避免重复检查/创建目录
@@ -62,8 +57,11 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
                         System.getenv("NUTSTORE_PASSWORD")));
         this.password = decodePasswordIfNeeded(rawPassword);
 
-        this.webdavBase = config.getProperty("nutstore.webdav.base", DEFAULT_WEBDAV_BASE);
-        this.syncPath = config.getProperty("nutstore.sync.path", DEFAULT_SYNC_PATH);
+        AppConfig appConfig = AppConfig.getInstance();
+        this.webdavBase = config.getProperty("nutstore.webdav.base",
+                appConfig.getString(ConfigKeys.NUTSTORE_WEBDAV_BASE));
+        this.syncPath = config.getProperty("nutstore.sync.path",
+                appConfig.getString(ConfigKeys.NUTSTORE_SYNC_PATH));
         this.syncRootUrl = webdavBase + syncPath;
 
         this.enabled = (username != null && !username.isEmpty()
@@ -147,11 +145,12 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
      * 请求限流：确保请求之间有足够的间隔
      */
     private synchronized void throttle() {
+        long intervalMs = AppConfig.getInstance().getLong(ConfigKeys.SYNC_REQUEST_INTERVAL_MS);
         long now = System.currentTimeMillis();
         long elapsed = now - lastRequestTime;
-        if (elapsed < REQUEST_INTERVAL_MS) {
+        if (elapsed < intervalMs) {
             try {
-                Thread.sleep(REQUEST_INTERVAL_MS - elapsed);
+                Thread.sleep(intervalMs - elapsed);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -456,8 +455,9 @@ public class NutstoreCloudProvider implements CloudStorageProvider {
                 existingDirs.add(url);
             } else if (e.getMessage().contains("503")) {
                 // 限流错误，等待后重试
-                logger.warn("[NutstoreProvider] 触发限流，等待 {} 秒后重试...", (RETRY_WAIT_MS/1000));
-                Thread.sleep(RETRY_WAIT_MS);
+                long retryWaitMs = AppConfig.getInstance().getLong(ConfigKeys.SYNC_RATELIMIT_WAIT_MS);
+                logger.warn("[NutstoreProvider] 触发限流，等待 {} 秒后重试...", (retryWaitMs / 1000));
+                Thread.sleep(retryWaitMs);
                 throttle();
                 try {
                     sardine.createDirectory(url + "/");

@@ -242,7 +242,9 @@ public class NoteFileStorage {
 
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(notesDir)) {
             for (Path path : stream) {
-                if (Files.isDirectory(path) && !path.getFileName().toString().startsWith(".")) {
+                String name = path.getFileName().toString();
+                // . 开头是隐藏/元数据，_ 开头是知识库内部数据（如 _kb 词表），都不是笔记
+                if (Files.isDirectory(path) && !name.startsWith(".") && !name.startsWith("_")) {
                     NoteDto note = loadFromFile(path);
                     if (note != null) {
                         notes.add(note);
@@ -353,19 +355,21 @@ public class NoteFileStorage {
         sb.append("desc: \"").append(escapeYaml(note.desc)).append("\"\n");
 
         // tags 数组
-        sb.append("tags: [");
-        if (note.tags != null && !note.tags.isEmpty()) {
-            for (int i = 0; i < note.tags.size(); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append("\"").append(escapeYaml(note.tags.get(i))).append("\"");
-            }
-        }
-        sb.append("]\n");
+        appendStringArray(sb, "tags", note.tags);
 
         sb.append("version: ").append(note.version).append("\n");
         sb.append("deleted: ").append(note.deleted ? "true" : "false").append("\n");
         sb.append("createdAt: ").append(formatTimestamp(note.createdAt)).append("\n");
         sb.append("updatedAt: ").append(formatTimestamp(note.updatedAt)).append("\n");
+
+        // 知识库分类与治理字段。旧笔记没有这些字段，读入时取默认值，
+        // 这里统一写出，保证任何一次保存后元数据都是完整的。
+        sb.append("domain: \"").append(escapeYaml(NoteDto.orDefault(note.domain, NoteDto.DEFAULT_DOMAIN))).append("\"\n");
+        sb.append("topic: \"").append(escapeYaml(NoteDto.orDefault(note.topic, NoteDto.DEFAULT_TOPIC))).append("\"\n");
+        sb.append("noteType: \"").append(escapeYaml(NoteDto.normalizeNoteType(note.noteType))).append("\"\n");
+        sb.append("layer: \"").append(escapeYaml(NoteDto.normalizeLayer(note.layer))).append("\"\n");
+        sb.append("visibility: \"").append(escapeYaml(NoteDto.normalizeVisibility(note.effectiveVisibility()))).append("\"\n");
+        appendStringArray(sb, "aliases", note.aliases);
 
         // 私密笔记的加密参数。这些值不是机密，必须明文写入：
         // 云同步的 version/deleted 判定直接对 note.md 原文做字符串查找。
@@ -381,14 +385,7 @@ public class NoteFileStorage {
 
             // 图片引用清单必须明文保留，否则正文加密后 cleanupUnusedAssets
             // 扫不到任何引用，会把 assets 下的图片全部删掉
-            sb.append("assets: [");
-            if (note.assets != null && !note.assets.isEmpty()) {
-                for (int i = 0; i < note.assets.size(); i++) {
-                    if (i > 0) sb.append(", ");
-                    sb.append("\"").append(escapeYaml(note.assets.get(i))).append("\"");
-                }
-            }
-            sb.append("]\n");
+            appendStringArray(sb, "assets", note.assets);
         }
 
         sb.append("---\n\n");
@@ -405,6 +402,18 @@ public class NoteFileStorage {
         if (value != null && !value.isEmpty()) {
             sb.append(key).append(": ").append(value).append("\n");
         }
+    }
+
+    /** 写出 YAML 内联字符串数组，null 与空列表都写成 []。 */
+    private void appendStringArray(StringBuilder sb, String key, List<String> values) {
+        sb.append(key).append(": [");
+        if (values != null) {
+            for (int i = 0; i < values.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append("\"").append(escapeYaml(values.get(i))).append("\"");
+            }
+        }
+        sb.append("]\n");
     }
 
     /**
@@ -473,6 +482,14 @@ public class NoteFileStorage {
         String tagsStr = values.get("tags");
         note.tags = parseTags(tagsStr);
 
+        // 知识库元数据。旧文件没有这些键，取默认值即可，不需要迁移脚本改写存量文件。
+        note.domain = NoteDto.orDefault(unescapeYaml(values.get("domain")), NoteDto.DEFAULT_DOMAIN);
+        note.topic = NoteDto.orDefault(unescapeYaml(values.get("topic")), NoteDto.DEFAULT_TOPIC);
+        note.noteType = NoteDto.normalizeNoteType(unescapeYaml(values.get("noteType")));
+        note.layer = NoteDto.normalizeLayer(unescapeYaml(values.get("layer")));
+        note.visibility = NoteDto.normalizeVisibility(unescapeYaml(values.get("visibility")));
+        note.aliases = parseTags(values.get("aliases"));
+
         // 私密笔记的加密参数。解析器对缺失字段宽容，旧版本笔记读取不受影响。
         note.encrypted = "true".equalsIgnoreCase(values.get("encrypted"));
         if (note.encrypted) {
@@ -485,6 +502,8 @@ public class NoteFileStorage {
             note.masterWrappedDek = values.get("masterWrappedDek");
             note.assets = parseTags(values.get("assets"));
             note.locked = true; // 从磁盘读出来时一律是锁定态，待解锁后才有明文
+            // 手工把 visibility 改成 ai 也不能绕过加密
+            note.visibility = NoteDto.VISIBILITY_PRIVATE;
         }
     }
 
@@ -511,9 +530,9 @@ public class NoteFileStorage {
         }
 
         // 分割并处理每个 tag
-        for (String tag : tagsStr.split(",")) {
-            tag = tag.trim();
-            if (tag.startsWith("\"") && tag.endsWith("\"")) {
+        for (String item : splitOutsideQuotes(tagsStr)) {
+            String tag = item.trim();
+            if (tag.length() >= 2 && tag.startsWith("\"") && tag.endsWith("\"")) {
                 tag = tag.substring(1, tag.length() - 1);
             }
             if (!tag.isEmpty()) {
@@ -522,6 +541,37 @@ public class NoteFileStorage {
         }
 
         return tags;
+    }
+
+    /**
+     * 按逗号切分 YAML 内联数组，但引号内的逗号属于值本身。
+     * 标签与别名里出现逗号是常态，直接 split(",") 会把一个值撕成两半。
+     */
+    private static List<String> splitOutsideQuotes(String text) {
+        List<String> parts = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inQuotes = false;
+        boolean escaped = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (escaped) {
+                current.append(c);
+                escaped = false;
+            } else if (c == '\\') {
+                current.append(c);
+                escaped = true;
+            } else if (c == '"') {
+                inQuotes = !inQuotes;
+                current.append(c);
+            } else if (c == ',' && !inQuotes) {
+                parts.add(current.toString());
+                current.setLength(0);
+            } else {
+                current.append(c);
+            }
+        }
+        parts.add(current.toString());
+        return parts;
     }
 
     /**

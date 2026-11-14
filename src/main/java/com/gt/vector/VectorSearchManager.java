@@ -1,7 +1,9 @@
 package com.gt.vector;
 
+import com.gt.AppConfig;
 import com.gt.UnifiedNoteAppFrame;
 import com.gt.VectorSearchPanel;
+import com.gt.config.ConfigKeys;
 import com.gt.storage.NoteFileStorage;
 
 import org.apache.logging.log4j.LogManager;
@@ -26,17 +28,12 @@ import java.util.function.BiConsumer;
  * 
  * 触发条件：
  * 1. 输入以 `:` 或 `：` 开头
- * 2. 去掉前缀后字符数 ≥2
- * 3. 停顿 ≥300ms（debounce）
+ * 2. 去掉前缀后字符数 ≥ search.min.query.chars
+ * 3. 停顿 ≥ search.debounce.ms（debounce）
  */
 public class VectorSearchManager {
     
     private static final Logger logger = LogManager.getLogger(VectorSearchManager.class);
-    
-    // 配置
-    private static final int MIN_QUERY_LENGTH = 2;
-    private static final int DEBOUNCE_MS = 300;
-    private static final int TOP_K = 20;
     
     private static VectorSearchManager instance;
     
@@ -52,9 +49,8 @@ public class VectorSearchManager {
     private boolean indexingInProgress = false;
     private boolean downloadPromptShown = false; // 避免重复弹出下载提示
     
-    // indexNote 去抖：同一笔记 2 秒内的多次保存合并为最后一次执行
+    // indexNote 去抖：同一笔记多次保存合并为最后一次执行，延迟见 index.save.delay.ms
     private final ConcurrentHashMap<String, ScheduledFuture<?>> pendingIndexTasks = new ConcurrentHashMap<>();
-    private static final long INDEX_COOLDOWN_MS = 2000;
     
     private VectorSearchManager() {
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -171,7 +167,7 @@ public class VectorSearchManager {
             // 只在输入满足触发条件时才提示（直接输入即触发）
             if (isVectorSearchTrigger(input)) {
                 String query = input.trim();
-                if (query.length() >= MIN_QUERY_LENGTH) {
+                if (query.length() >= AppConfig.getInstance().getInt(ConfigKeys.SEARCH_MIN_QUERY_CHARS)) {
                     if (!ModelManager.isModelDownloaded()) {
                         // 模型未下载，提示用户下载
                         logger.info("模型未下载，准备提示用户下载");
@@ -209,7 +205,7 @@ public class VectorSearchManager {
         String query = input.trim();
         
         // 检查最小字符数
-        if (query.length() < MIN_QUERY_LENGTH) {
+        if (query.length() < AppConfig.getInstance().getInt(ConfigKeys.SEARCH_MIN_QUERY_CHARS)) {
             hideResults();
             return;
         }
@@ -224,7 +220,7 @@ public class VectorSearchManager {
         // 设置 debounce 任务
         debounceTask = scheduler.schedule(() -> {
             performSearch(query, component);
-        }, DEBOUNCE_MS, TimeUnit.MILLISECONDS);
+        }, AppConfig.getInstance().getInt(ConfigKeys.SEARCH_DEBOUNCE_MS), TimeUnit.MILLISECONDS);
     }
     
     /**
@@ -242,7 +238,8 @@ public class VectorSearchManager {
         
         // 执行搜索
         logger.debug("开始向量检索...");
-        List<LuceneVectorSearchService.VectorSearchResult> results = searchService.search(query, TOP_K);
+        List<LuceneVectorSearchService.VectorSearchResult> results =
+            searchService.search(query, AppConfig.getInstance().getInt(ConfigKeys.SEARCH_HUMAN_TOPK));
         logger.debug("检索完成，结果数: {}", results.size());
         
         // 在 EDT 中更新 UI
@@ -364,7 +361,7 @@ public class VectorSearchManager {
                 pendingIndexTasks.remove(noteKey);
                 doIndexNote(noteKey, noteDesc, content);
             },
-            INDEX_COOLDOWN_MS, TimeUnit.MILLISECONDS);
+            AppConfig.getInstance().getLong(ConfigKeys.INDEX_SAVE_DELAY_MS), TimeUnit.MILLISECONDS);
         pendingIndexTasks.put(noteKey, task);
     }
     
@@ -465,7 +462,10 @@ public class VectorSearchManager {
                 
                 List<Path> noteDirs;
                 try (var stream = Files.list(notesDir)) {
-                    noteDirs = stream.filter(Files::isDirectory).toList();
+                    // 以 _ 开头的目录是知识库内部数据（如 _kb 内容配置），不是笔记
+                    noteDirs = stream.filter(Files::isDirectory)
+                        .filter(p -> !p.getFileName().toString().startsWith("_"))
+                        .toList();
                 }
                 
                 int total = noteDirs.size();

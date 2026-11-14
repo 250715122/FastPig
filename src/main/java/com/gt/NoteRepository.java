@@ -46,6 +46,13 @@ public class NoteRepository {
             addColumnIfNotExists(conn, "content_hash", "TEXT");
             // 私密笔记标记：全文搜索要据此排除加密笔记，避免通过 body_md 残留泄漏内容
             addColumnIfNotExists(conn, "encrypted", "INTEGER DEFAULT 0");
+            // 知识库分类与治理字段
+            addColumnIfNotExists(conn, "domain", "TEXT");
+            addColumnIfNotExists(conn, "topic", "TEXT");
+            addColumnIfNotExists(conn, "note_type", "TEXT");
+            addColumnIfNotExists(conn, "layer", "TEXT");
+            addColumnIfNotExists(conn, "visibility", "TEXT");
+            addColumnIfNotExists(conn, "aliases_json", "TEXT");
             
             // 创建索引
             st.execute("CREATE INDEX IF NOT EXISTS idx_snippets_key ON snippets(key)");
@@ -81,12 +88,14 @@ public class NoteRepository {
      * 保存笔记（完整保存，包含正文）
      */
     public void save(NoteDto note) {
-        String sql = "INSERT INTO snippets(id, key, title, desc, tags_json, body_md, front_matter, created_at, updated_at, version, deleted, folder_path, content_hash)\n" +
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)\n" +
+        String sql = "INSERT INTO snippets(id, key, title, desc, tags_json, body_md, front_matter, created_at, updated_at, version, deleted, folder_path, content_hash, domain, topic, note_type, layer, visibility, aliases_json)\n" +
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)\n" +
                 "ON CONFLICT(id) DO UPDATE SET key=excluded.key, title=excluded.title, desc=excluded.desc, " +
                 "tags_json=excluded.tags_json, body_md=excluded.body_md, front_matter=excluded.front_matter, " +
                 "updated_at=excluded.updated_at, version=excluded.version, deleted=excluded.deleted, " +
-                "folder_path=excluded.folder_path, content_hash=excluded.content_hash";
+                "folder_path=excluded.folder_path, content_hash=excluded.content_hash, " +
+                "domain=excluded.domain, topic=excluded.topic, note_type=excluded.note_type, " +
+                "layer=excluded.layer, visibility=excluded.visibility, aliases_json=excluded.aliases_json";
         try (Connection conn = getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, note.id);
             ps.setString(2, note.key);
@@ -101,12 +110,14 @@ public class NoteRepository {
             ps.setInt(11, note.deleted ? 1 : 0);
             ps.setString(12, note.folderPath);
             ps.setString(13, note.contentHash);
+            bindMeta(ps, 14, note);
             ps.executeUpdate();
         } catch (SQLException e) {
             // 若因 key 唯一约束失败，则按 key 进行更新（幂等覆盖）
             if (e.getMessage() != null && e.getMessage().contains("UNIQUE constraint failed: snippets.key")) {
                 String up = "UPDATE snippets SET title=?, desc=?, tags_json=?, body_md=?, front_matter=?, " +
-                        "updated_at=?, version=?, deleted=?, folder_path=?, content_hash=? WHERE key=?";
+                        "updated_at=?, version=?, deleted=?, folder_path=?, content_hash=?, " +
+                        "domain=?, topic=?, note_type=?, layer=?, visibility=?, aliases_json=? WHERE key=?";
                 try (Connection c2 = getConnection(); PreparedStatement ps2 = c2.prepareStatement(up)) {
                     ps2.setString(1, note.title);
                     ps2.setString(2, note.desc);
@@ -118,7 +129,8 @@ public class NoteRepository {
                     ps2.setInt(8, note.deleted ? 1 : 0);
                     ps2.setString(9, note.folderPath);
                     ps2.setString(10, note.contentHash);
-                    ps2.setString(11, note.key);
+                    bindMeta(ps2, 11, note);
+                    ps2.setString(17, note.key);
                     ps2.executeUpdate();
                     return;
                 } catch (SQLException ex) {
@@ -129,17 +141,29 @@ public class NoteRepository {
         }
     }
 
+    /** 六个知识库元数据字段按固定顺序绑定，save 与 saveIndex 共用，避免两处列序漂移。 */
+    private void bindMeta(PreparedStatement ps, int start, NoteDto note) throws SQLException {
+        ps.setString(start, NoteDto.orDefault(note.domain, NoteDto.DEFAULT_DOMAIN));
+        ps.setString(start + 1, NoteDto.orDefault(note.topic, NoteDto.DEFAULT_TOPIC));
+        ps.setString(start + 2, NoteDto.normalizeNoteType(note.noteType));
+        ps.setString(start + 3, NoteDto.normalizeLayer(note.layer));
+        ps.setString(start + 4, NoteDto.normalizeVisibility(note.effectiveVisibility()));
+        ps.setString(start + 5, toJson(note.aliases));
+    }
+
     /**
      * 仅保存索引信息（不包含正文）
      * 用于新的文件存储模式
      */
     public void saveIndex(NoteDto note) {
-        String sql = "INSERT INTO snippets(id, key, title, desc, tags_json, created_at, updated_at, version, deleted, folder_path, content_hash, encrypted)\n" +
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)\n" +
+        String sql = "INSERT INTO snippets(id, key, title, desc, tags_json, created_at, updated_at, version, deleted, folder_path, content_hash, encrypted, domain, topic, note_type, layer, visibility, aliases_json)\n" +
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)\n" +
                 "ON CONFLICT(id) DO UPDATE SET key=excluded.key, title=excluded.title, desc=excluded.desc, " +
                 "tags_json=excluded.tags_json, updated_at=excluded.updated_at, version=excluded.version, " +
                 "deleted=excluded.deleted, folder_path=excluded.folder_path, content_hash=excluded.content_hash, " +
-                "encrypted=excluded.encrypted";
+                "encrypted=excluded.encrypted, domain=excluded.domain, topic=excluded.topic, " +
+                "note_type=excluded.note_type, layer=excluded.layer, visibility=excluded.visibility, " +
+                "aliases_json=excluded.aliases_json";
         try (Connection conn = getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, note.id);
             ps.setString(2, note.key);
@@ -153,11 +177,13 @@ public class NoteRepository {
             ps.setString(10, note.folderPath);
             ps.setString(11, note.contentHash);
             ps.setInt(12, note.encrypted ? 1 : 0);
+            bindMeta(ps, 13, note);
             ps.executeUpdate();
         } catch (SQLException e) {
             if (e.getMessage() != null && e.getMessage().contains("UNIQUE constraint failed: snippets.key")) {
                 String up = "UPDATE snippets SET title=?, desc=?, tags_json=?, updated_at=?, version=?, " +
-                        "deleted=?, folder_path=?, content_hash=?, encrypted=? WHERE key=?";
+                        "deleted=?, folder_path=?, content_hash=?, encrypted=?, " +
+                        "domain=?, topic=?, note_type=?, layer=?, visibility=?, aliases_json=? WHERE key=?";
                 try (Connection c2 = getConnection(); PreparedStatement ps2 = c2.prepareStatement(up)) {
                     ps2.setString(1, note.title);
                     ps2.setString(2, note.desc);
@@ -168,7 +194,8 @@ public class NoteRepository {
                     ps2.setString(7, note.folderPath);
                     ps2.setString(8, note.contentHash);
                     ps2.setInt(9, note.encrypted ? 1 : 0);
-                    ps2.setString(10, note.key);
+                    bindMeta(ps2, 10, note);
+                    ps2.setString(16, note.key);
                     ps2.executeUpdate();
                     return;
                 } catch (SQLException ex) {
@@ -395,10 +422,22 @@ public class NoteRepository {
         } catch (SQLException e) {
             n.encrypted = false;
         }
+        // 知识库元数据。旧库没有这些列，缺列时保留 NoteDto 的默认值。
+        try {
+            n.domain = NoteDto.orDefault(rs.getString("domain"), NoteDto.DEFAULT_DOMAIN);
+            n.topic = NoteDto.orDefault(rs.getString("topic"), NoteDto.DEFAULT_TOPIC);
+            n.noteType = NoteDto.normalizeNoteType(rs.getString("note_type"));
+            n.layer = NoteDto.normalizeLayer(rs.getString("layer"));
+            n.visibility = NoteDto.normalizeVisibility(rs.getString("visibility"));
+            n.aliases = fromJson(rs.getString("aliases_json"));
+        } catch (SQLException e) {
+            // 列不存在，沿用默认值
+        }
         // 私密笔记的正文只以密文存在于文件里，库里读到的任何 body_md 都是历史残留，不可信
         if (n.encrypted) {
             n.bodyMd = null;
             n.locked = true;
+            n.visibility = NoteDto.VISIBILITY_PRIVATE;
         }
         
         return n;

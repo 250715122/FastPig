@@ -1,5 +1,8 @@
 package com.gt.vector;
 
+import com.gt.AppConfig;
+import com.gt.config.ConfigKeys;
+
 import java.util.*;
 import java.util.regex.*;
 
@@ -11,12 +14,9 @@ public class NoteH1Parser {
     
     // 匹配 H1 标题的正则：行首 # 后跟空格和内容
     private static final Pattern H1_PATTERN = Pattern.compile("^#\\s+(.+)$", Pattern.MULTILINE);
-    
-    // 索引内容最大长度（正文截取）
-    private static final int MAX_CONTENT_LENGTH = 300;
 
-    // 清洗前的正文截断长度，用来把单块的清洗开销限制成常数
-    private static final int PRECLEAN_LIMIT = MAX_CONTENT_LENGTH * 12;
+    // 清洗前截断长度相对最终保留长度的余量倍数，覆盖清洗时被删掉的 Markdown 标记
+    private static final int PRECLEAN_FACTOR = 12;
 
     /**
      * Markdown 清洗规则。
@@ -143,7 +143,7 @@ public class NoteH1Parser {
             }
         }
         
-        // 添加笔记名单独索引，支持精确搜索笔记名（如 linux、dlmhrz）
+        // 添加笔记名单独索引，支持精确搜索笔记名（如 linux、mysql）
         // 使用特殊标记 __NOTE_NAME__ 避免与其他索引的 docId 冲突
         if (noteKey != null && !noteKey.isEmpty()) {
             H1Block noteNameBlock = new H1Block();
@@ -255,29 +255,31 @@ public class NoteH1Parser {
     }
     
     /**
-     * 构建索引内容：H1 标题 + 正文前 MAX_CONTENT_LENGTH 字。
+     * 构建索引内容：H1 标题 + 正文前 index.content.max.chars 字。
      *
      * 正文必须参与 embedding，否则"向量检索"实际只是在匹配标题字符串，
      * 正文里写了但标题没提到的内容永远检索不到。
      * 标题放在最前面，保证它在截断后的内容里始终占有权重。
      */
     private static String buildIndexContent(String h1Title, String body) {
+        int maxContentLength = AppConfig.getInstance().getInt(ConfigKeys.INDEX_CONTENT_MAX_CHARS);
+        int precleanLimit = maxContentLength * PRECLEAN_FACTOR;
         StringBuilder sb = new StringBuilder();
         if (h1Title != null && !h1Title.isEmpty()) {
             sb.append(h1Title);
         }
         
-        // 先截断再清洗。最终只保留 MAX_CONTENT_LENGTH 个字，
+        // 先截断再清洗。最终只保留 maxContentLength 个字，
         // 把整块正文（可能几十 KB）完整跑一遍正则再丢掉 99% 纯属浪费；
         // 留出十几倍余量，足够覆盖清洗过程中被删掉的标记。
-        String source = body != null && body.length() > PRECLEAN_LIMIT
-                ? body.substring(0, PRECLEAN_LIMIT)
+        String source = body != null && body.length() > precleanLimit
+                ? body.substring(0, precleanLimit)
                 : body;
         String cleanBody = cleanMarkdown(source);
         if (!cleanBody.isEmpty()) {
             if (sb.length() > 0) sb.append('\n');
-            sb.append(cleanBody.length() > MAX_CONTENT_LENGTH
-                    ? cleanBody.substring(0, MAX_CONTENT_LENGTH)
+            sb.append(cleanBody.length() > maxContentLength
+                    ? cleanBody.substring(0, maxContentLength)
                     : cleanBody);
         }
         

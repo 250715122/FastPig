@@ -2,6 +2,9 @@ package com.gt.vector;
 
 import ai.onnxruntime.*;
 
+import com.gt.AppConfig;
+import com.gt.config.ConfigKeys;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -23,14 +26,8 @@ public class EmbeddingService {
     private static final Logger logger = LogManager.getLogger(EmbeddingService.class);
     
     private static final String MODEL_DIR = "models";
-    private static final String MODEL_FILE = "bge-small-zh-v1.5.onnx";
     private static final String VOCAB_FILE = "vocab.txt";
     private static final int VECTOR_DIM = 512;
-    private static final int MAX_SEQ_LENGTH = 512;
-    
-    // 模型下载 URL（使用 Xenova 转换的 ONNX 版本）
-    private static final String MODEL_URL = "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model.onnx";
-    private static final String VOCAB_URL = "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/vocab.txt";
     
     private static EmbeddingService instance;
     
@@ -217,12 +214,13 @@ public class EmbeddingService {
             Path modelDir = Paths.get(System.getProperty("user.dir"), MODEL_DIR);
             Files.createDirectories(modelDir);
             
-            Path modelPath = modelDir.resolve(MODEL_FILE);
+            Path modelPath = modelDir.resolve(AppConfig.getInstance().getString(ConfigKeys.MODEL_FILE));
             Path vocabPath = modelDir.resolve(VOCAB_FILE);
             
             // 下载模型文件
-            logger.info("开始下载模型: {}", MODEL_URL);
-            if (!downloadFile(MODEL_URL, modelPath, progress -> {
+            String modelUrl = AppConfig.getInstance().getString(ConfigKeys.MODEL_URL);
+            logger.info("开始下载模型: {}", modelUrl);
+            if (!downloadFile(modelUrl, modelPath, progress -> {
                 if (progressCallback != null) {
                     progressCallback.accept(progress * 0.9); // 模型占 90%
                 }
@@ -231,8 +229,9 @@ public class EmbeddingService {
             }
             
             // 下载词汇表
-            logger.info("开始下载词汇表: {}", VOCAB_URL);
-            if (!downloadFile(VOCAB_URL, vocabPath, progress -> {
+            String vocabUrl = AppConfig.getInstance().getString(ConfigKeys.MODEL_VOCAB_URL);
+            logger.info("开始下载词汇表: {}", vocabUrl);
+            if (!downloadFile(vocabUrl, vocabPath, progress -> {
                 if (progressCallback != null) {
                     progressCallback.accept(0.9 + progress * 0.1); // 词汇表占 10%
                 }
@@ -267,7 +266,8 @@ public class EmbeddingService {
     // ==================== 私有方法 ====================
     
     private Path getModelPath() {
-        return Paths.get(System.getProperty("user.dir"), MODEL_DIR, MODEL_FILE);
+        return Paths.get(System.getProperty("user.dir"), MODEL_DIR,
+            AppConfig.getInstance().getString(ConfigKeys.MODEL_FILE));
     }
     
     private Path getVocabPath() {
@@ -298,6 +298,7 @@ public class EmbeddingService {
      * 按字符切分（中文）+ WordPiece（英文）
      */
     private int[] tokenize(String text) {
+        int maxSeqLength = AppConfig.getInstance().getInt(ConfigKeys.MODEL_MAX_TOKENS);
         List<Integer> tokens = new ArrayList<>();
         tokens.add(clsTokenId); // [CLS]
         
@@ -306,7 +307,7 @@ public class EmbeddingService {
         
         // 按字符遍历
         int i = 0;
-        while (i < text.length() && tokens.size() < MAX_SEQ_LENGTH - 1) {
+        while (i < text.length() && tokens.size() < maxSeqLength - 1) {
             char c = text.charAt(i);
             
             if (Character.isWhitespace(c)) {

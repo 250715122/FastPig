@@ -1,5 +1,8 @@
 package com.gt.vector;
 
+import com.gt.AppConfig;
+import com.gt.config.ConfigKeys;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.document.*;
@@ -28,8 +31,6 @@ public class LuceneVectorSearchService implements VectorSearchService {
     
     private static final String INDEX_DIR = "vector_index";
     private static final int VECTOR_DIM = 512;
-    private static final int HNSW_MAX_CONN = 16;  // HNSW M 参数
-    private static final int HNSW_BEAM_WIDTH = 100;  // HNSW efConstruction
     
     /**
      * 索引结构版本。docId 格式变化或字段增减时必须递增，
@@ -38,10 +39,6 @@ public class LuceneVectorSearchService implements VectorSearchService {
      */
     private static final int SCHEMA_VERSION = 2;
     private static final String SCHEMA_FILE = ".schema_version";
-    
-    // 搜索结果多样性：每篇笔记最多占用的条数，以及为此需要的超取倍率
-    private static final int PER_NOTE_QUOTA = 3;
-    private static final int OVERFETCH_FACTOR = 4;
     
     // 字段名
     private static final String FIELD_ID = "id";
@@ -431,7 +428,7 @@ public class LuceneVectorSearchService implements VectorSearchService {
         }
         
         // 超取：后面要按笔记配额筛选，不多取就没有多样性可挑
-        int fetchK = topK * OVERFETCH_FACTOR;
+        int fetchK = topK * AppConfig.getInstance().getInt(ConfigKeys.SEARCH_OVERFETCH);
         
         lock.readLock().lock();
         try {
@@ -480,10 +477,11 @@ public class LuceneVectorSearchService implements VectorSearchService {
     /**
      * 按笔记配额裁剪结果，避免一篇有上百个 H1 的笔记占满整个结果列表。
      *
-     * 先按每篇最多 PER_NOTE_QUOTA 条挑选，若不足 topK 再用剩下的候选按分数回填 ——
-     * 回填这步不能少，否则当查询只命中单篇笔记时结果会从 topK 锐减到 3 条，比不做配额还差。
+     * 先按每篇最多 search.human.per.note 条挑选，若不足 topK 再用剩下的候选按分数回填 ——
+     * 回填这步不能少，否则当查询只命中单篇笔记时结果会从 topK 锐减到配额条数，比不做配额还差。
      */
     private List<VectorSearchResult> applyPerNoteQuota(List<VectorSearchResult> candidates, int topK) {
+        int quota = AppConfig.getInstance().getInt(ConfigKeys.SEARCH_HUMAN_PER_NOTE);
         List<VectorSearchResult> picked = new ArrayList<>();
         List<VectorSearchResult> overflow = new ArrayList<>();
         Map<String, Integer> perNote = new HashMap<>();
@@ -491,7 +489,7 @@ public class LuceneVectorSearchService implements VectorSearchService {
         for (VectorSearchResult r : candidates) {
             String key = r.noteKey != null ? r.noteKey : "";
             int used = perNote.getOrDefault(key, 0);
-            if (used < PER_NOTE_QUOTA && picked.size() < topK) {
+            if (used < quota && picked.size() < topK) {
                 picked.add(r);
                 perNote.put(key, used + 1);
             } else {
@@ -702,7 +700,8 @@ public class LuceneVectorSearchService implements VectorSearchService {
         doc.add(new StringField(FIELD_NOTE_KEY, noteKey, Field.Store.YES));
         doc.add(new StoredField(FIELD_NOTE_DESC, noteDesc != null ? noteDesc : ""));
         doc.add(new StoredField(FIELD_H1_TITLE, h1Title));
-        doc.add(new StoredField(FIELD_CONTENT, truncate(indexContent, 200)));
+        doc.add(new StoredField(FIELD_CONTENT,
+            truncate(indexContent, AppConfig.getInstance().getInt(ConfigKeys.INDEX_SNIPPET_MAX_CHARS))));
         doc.add(new StringField(FIELD_BLOCK_HASH, blockHash != null ? blockHash : "", Field.Store.YES));
         doc.add(new KnnFloatVectorField(FIELD_VECTOR, vector, VectorSimilarityFunction.COSINE));
         return doc;

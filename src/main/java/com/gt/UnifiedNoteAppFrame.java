@@ -46,6 +46,8 @@ import org.scilab.forge.jlatexmath.TeXIcon;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.gt.config.ConfigKeys;
+import com.gt.kb.TaxonomyGuesser;
 import com.gt.vector.VectorSearchManager;
 import com.gt.vector.NoteH1Parser;
 
@@ -454,11 +456,22 @@ public class UnifiedNoteAppFrame extends JFrame {
         statusLeft.setForeground(UIColors.TEXT_PRIMARY);
         statusRight = new JLabel("");
         statusRight.setForeground(UIColors.TEXT_SECONDARY);
+        classifyLabel = new JLabel("");
+        classifyLabel.setForeground(UIColors.TEXT_SECONDARY);
+        classifyLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        classifyLabel.setToolTipText("点击修改分类");
+        classifyLabel.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseClicked(java.awt.event.MouseEvent e) { openClassifyDialog(); }
+        });
+        JPanel statusRightBox = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
+        statusRightBox.setOpaque(false);
+        statusRightBox.add(statusRight);
+        statusRightBox.add(classifyLabel);
         statusBar = new JPanel(new BorderLayout(8, 0));
         statusBar.setBackground(UIColors.BG_PRIMARY);
         statusBar.setBorder(BorderFactory.createEmptyBorder(4,8,4,8));
         statusBar.add(statusLeft, BorderLayout.WEST);
-        statusBar.add(statusRight, BorderLayout.EAST);
+        statusBar.add(statusRightBox, BorderLayout.EAST);
 
         // 初始化页内搜索面板
         initSearchPanel();
@@ -929,8 +942,7 @@ public class UnifiedNoteAppFrame extends JFrame {
 
     // 预览自适应渲染：超过阈值只渲染光标所在章节。
     // 大文档预览的开销大头是 JEditorPane 解析 HTML，必须限制送进去的内容量。
-    private static final int PREVIEW_SECTION_ON = 50 * 1024;  // 超过此值切分节
-    private static final int PREVIEW_SECTION_OFF = 45 * 1024; // 回落到此值才切回全文（滞回）
+    // 阈值见 preview.section.on.kb / preview.section.off.kb，两者构成滞回区间。
     private boolean previewSectionMode = false;
     private int previewSectionStart = 0;
     private int previewSectionEnd = Integer.MAX_VALUE;
@@ -949,6 +961,7 @@ public class UnifiedNoteAppFrame extends JFrame {
     private JPanel statusBar;
     private JLabel statusLeft;
     private JLabel statusRight;
+    private JLabel classifyLabel;
     private long lastSavedAt = 0L;
     private boolean darkTheme = false;
     private Component centerComponent;
@@ -1522,15 +1535,23 @@ public class UnifiedNoteAppFrame extends JFrame {
         }
     }
 
+    /** 阈值配置单位是 KB，换算成与正文长度可比的字符数。 */
+    private static int previewSectionThreshold(ConfigKeys key) {
+        return AppConfig.getInstance().getInt(key) * 1024;
+    }
+
     private void refreshInAppPreview() {
         if (htmlPane == null) return;
         String fullMd = bodyArea.getText();
         if (fullMd == null) fullMd = "";
 
-        // 滞回切换渲染模式，避免正文在阈值上下横跳时预览来回切
-        if (!previewSectionMode && fullMd.length() > PREVIEW_SECTION_ON) {
+        // 滞回切换渲染模式，避免正文在阈值上下横跳时预览来回切。
+        // 回落阈值必须严格小于进入阈值，否则配错会让模式每帧翻转。
+        int sectionOn = previewSectionThreshold(ConfigKeys.PREVIEW_SECTION_ON_KB);
+        int sectionOff = Math.min(previewSectionThreshold(ConfigKeys.PREVIEW_SECTION_OFF_KB), sectionOn - 1);
+        if (!previewSectionMode && fullMd.length() > sectionOn) {
             previewSectionMode = true;
-        } else if (previewSectionMode && fullMd.length() < PREVIEW_SECTION_OFF) {
+        } else if (previewSectionMode && fullMd.length() < sectionOff) {
             previewSectionMode = false;
         }
 
@@ -1554,7 +1575,7 @@ public class UnifiedNoteAppFrame extends JFrame {
 
         // 分节后单次渲染量已经很小，去抖统一回到 200ms（原先提到 600ms 后从不回落）
         if (previewTimer != null) {
-            int delay = (!previewSectionMode && fullMd.length() > PREVIEW_SECTION_ON) ? 600 : 200;
+            int delay = (!previewSectionMode && fullMd.length() > sectionOn) ? 600 : 200;
             if (previewTimer.getDelay() != delay) previewTimer.setDelay(delay);
         }
 
@@ -2458,11 +2479,18 @@ public class UnifiedNoteAppFrame extends JFrame {
         n.createdAt = now;
         n.updatedAt = now;
         n.version = 1;
+        // 词面猜测是纯字符串匹配，可以同步做；向量猜测慢，保存后再后台补
+        TaxonomyGuesser.Guess guess = TaxonomyGuesser.matchKeyword(currentTaxonomy(), n.key, n.desc);
+        if (guess != null) {
+            n.domain = guess.domain();
+            n.topic = guess.topic();
+        }
         // 使用 NoteService 保存（同时写入文件和索引）
         noteService.save(n);
         // 只更新 current，不重新加载文本
         current = n;
         updateEditorStatus();
+        refineClassificationAsync(n, bodyArea.getText());
         // 恢复选区状态
         try {
             int textLength = bodyArea.getText().length();
@@ -2493,7 +2521,6 @@ public class UnifiedNoteAppFrame extends JFrame {
         current.key = newKey;
         current.desc = parsed[2];
         current.title = current.desc;
-        current.tags = new java.util.ArrayList<>();
         current.bodyMd = parsed[3];
         current.updatedAt = System.currentTimeMillis();
         current.version = Math.max(1, current.version + 1);
@@ -2523,6 +2550,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         }
         try{
             statusLeft.setText(manual? "保存中…" : "自动保存中…");
+            boolean isNew = (current == null);
             if (current == null) {
                 saveNew(manual);
             } else {
@@ -2530,10 +2558,79 @@ public class UnifiedNoteAppFrame extends JFrame {
             }
             lastSavedAt = System.currentTimeMillis();
             statusLeft.setText(manual? "已保存" : "已自动保存");
+            if (isNew && current != null) {
+                statusLeft.setText(NoteDto.DEFAULT_DOMAIN.equals(current.domain)
+                        ? "已保存到待分类"
+                        : "已保存到 " + current.domain + " / " + current.topic);
+            }
             updateEditorStatus();
         }catch(Exception ex){
             statusLeft.setText("保存失败（重试）");
         }
+    }
+
+    private com.gt.kb.Taxonomy currentTaxonomy() {
+        return com.gt.kb.Taxonomy.loadOrDefault(noteService.getFileStorage().getNotesDir());
+    }
+
+    /** 点击状态栏分类标签：改分类并立即落盘。 */
+    private void openClassifyDialog() {
+        if (current == null) {
+            JOptionPane.showMessageDialog(this, "请先保存笔记再设置分类", "提示", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        com.gt.kb.KbClassifyDialog.Result result =
+                com.gt.kb.KbClassifyDialog.prompt(this, currentTaxonomy(), current);
+        if (result == null) {
+            return;
+        }
+        current.domain = result.domain();
+        current.topic = result.topic();
+        current.visibility = result.visibility();
+        current.layer = result.layer();
+        saveUnified(true);
+        statusLeft.setText("分类已保存");
+    }
+
+    /**
+     * 词面没命中时，用向量相似度再猜一次。
+     * 推理耗时，放后台线程；结果只在仍是同一篇笔记时套用。
+     */
+    private void refineClassificationAsync(NoteDto note, String textAtSave) {
+        if (!NoteDto.DEFAULT_DOMAIN.equals(note.domain)) {
+            return;
+        }
+        Thread worker = new Thread(() -> {
+            try {
+                com.gt.vector.EmbeddingService embedding = com.gt.vector.EmbeddingService.getInstance();
+                if (!embedding.isAvailable()) {
+                    return;
+                }
+                TaxonomyGuesser guesser = new TaxonomyGuesser(currentTaxonomy(), embedding::embed,
+                        AppConfig.getInstance().getDouble(ConfigKeys.KB_GUESS_MIN_SCORE));
+                TaxonomyGuesser.Guess guess = guesser.guess(note.key, note.desc, note.bodyMd, repository.findAll());
+                if (NoteDto.DEFAULT_DOMAIN.equals(guess.domain())) {
+                    return;
+                }
+                SwingUtilities.invokeLater(() -> {
+                    if (current != note) {
+                        return;
+                    }
+                    note.domain = guess.domain();
+                    note.topic = guess.topic();
+                    updateClassifyLabel();
+                    // 正文没被动过才顺手存一次；否则留给下一次保存，避免覆盖用户正在输入的内容
+                    if (textAtSave.equals(bodyArea.getText())) {
+                        saveUnified(false);
+                    }
+                    statusLeft.setText("已保存到 " + guess.domain() + " / " + guess.topic());
+                });
+            } catch (Exception e) {
+                logger.warn("[分类猜测] 失败: {}", e.getMessage());
+            }
+        }, "kb-classify-guess");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private void deleteCurrent() {
@@ -2646,7 +2743,17 @@ public class UnifiedNoteAppFrame extends JFrame {
             int len = bodyArea.getDocument().getLength();
             String time = lastSavedAt == 0 ? "" : new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date(lastSavedAt));
             statusRight.setText("" + line + ":" + col + "  |  " + len + "字  " + (time.isEmpty()? "": (" |  更新时间 " + time)));
+            updateClassifyLabel();
         }catch(Exception ignored){}
+    }
+
+    private void updateClassifyLabel() {
+        if (classifyLabel == null) {
+            return;
+        }
+        classifyLabel.setText(current == null ? ""
+                : "[" + NoteDto.orDefault(current.domain, NoteDto.DEFAULT_DOMAIN)
+                  + " / " + NoteDto.orDefault(current.topic, NoteDto.DEFAULT_TOPIC) + "]");
     }
 
     /**
@@ -4445,6 +4552,9 @@ public class UnifiedNoteAppFrame extends JFrame {
         }
         if (statusRight != null) {
             statusRight.setForeground(UIColors.TEXT_SECONDARY);
+        }
+        if (classifyLabel != null) {
+            classifyLabel.setForeground(UIColors.TEXT_SECONDARY);
         }
         
         // 应用主编辑器滚动面板主题

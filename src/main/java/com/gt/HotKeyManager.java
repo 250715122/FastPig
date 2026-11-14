@@ -9,6 +9,8 @@ import org.jnativehook.keyboard.NativeKeyListener;
 import com.melloware.jintellitype.HotkeyListener;
 import com.melloware.jintellitype.JIntellitype;
 
+import com.gt.config.ConfigKeys;
+
 import javax.swing.JFrame;
 import javax.swing.JTextArea;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -37,16 +39,31 @@ public class HotKeyManager {
     private volatile long lastSyncFinishedAt = 0;
     private final AtomicBoolean pullInProgress = new AtomicBoolean(false);
     private volatile long lastPullFinishedAt = 0;
-    private static final long SYNC_COOLDOWN_MS = 3000; // 3秒冷却期
     
     // 热键标识
     private static final int HOTKEY_SHOW_NORMAL = 1;
     private static final int HOTKEY_SHOW_MAX = 2;
     private static final int HOTKEY_MINIMIZE = 3;
     private static final int HOTKEY_EXIT = 4;
-    private static final int HOTKEY_SYNC = 5; // Alt+S 同步到云端
-    private static final int HOTKEY_PULL = 6; // Alt+U 从云端下载
-    // 兼容 Ctrl 系列（撤回）
+    private static final int HOTKEY_SYNC = 5; // 同步到云端
+    private static final int HOTKEY_PULL = 6; // 从云端下载
+    
+    // 两个后端共用同一份配置：下标与 HOTKEY_* 标识一一对应
+    private static final ConfigKeys[] HOTKEY_CONFIGS = {
+        ConfigKeys.HOTKEY_SHOW, ConfigKeys.HOTKEY_MAX, ConfigKeys.HOTKEY_MIN,
+        ConfigKeys.HOTKEY_EXIT, ConfigKeys.HOTKEY_SYNC, ConfigKeys.HOTKEY_PULL
+    };
+    private static final int[] HOTKEY_IDS = {
+        HOTKEY_SHOW_NORMAL, HOTKEY_SHOW_MAX, HOTKEY_MINIMIZE,
+        HOTKEY_EXIT, HOTKEY_SYNC, HOTKEY_PULL
+    };
+    private static final String[] HOTKEY_LABELS = {
+        "显示/恢复", "最大化", "最小化", "退出", "上传云端", "从云端下载"
+    };
+    
+    // JNativeHook 的 VC_ 键码，initialize 时按配置解析一次
+    private final int[] nativeKeyCodes = new int[HOTKEY_CONFIGS.length];
+    private final char[] hotKeyLetters = new char[HOTKEY_CONFIGS.length];
     
     public HotKeyManager(JFrame frame, JTextArea textArea) {
         this.targetFrame = frame;
@@ -59,6 +76,8 @@ public class HotKeyManager {
     public void initialize() {
         logger.info("正在初始化全局热键管理器...");
         SystemUtils.printSystemDiagnostics();
+        
+        resolveHotKeyBindings();
         
         // 首先尝试JNativeHook（推荐）
         if (tryJNativeHook()) {
@@ -78,6 +97,46 @@ public class HotKeyManager {
         activeMethod = HotKeyMethod.NONE;
         logger.warn("全局热键功能不可用");
         logger.warn("建议：1. 以管理员权限运行程序 2. 检查杀毒软件设置 3. 使用窗口菜单或系统托盘作为替代");
+    }
+    
+    /**
+     * 按配置解析六个热键的字母与 JNativeHook 键码。
+     * 只支持 Alt+字母：Ctrl 系列全局热键此前已撤回，这里不重新引入。
+     */
+    private void resolveHotKeyBindings() {
+        for (int i = 0; i < HOTKEY_CONFIGS.length; i++) {
+            char letter = parseHotKeyLetter(HOTKEY_CONFIGS[i]);
+            hotKeyLetters[i] = letter;
+            nativeKeyCodes[i] = nativeKeyCodeOf(letter);
+        }
+    }
+    
+    /** 解析 "Alt+X"，非法值回退到该项默认值，避免一个错字让全部热键失效。 */
+    private static char parseHotKeyLetter(ConfigKeys config) {
+        String fallback = String.valueOf(config.def);
+        String raw = AppConfig.getInstance().getString(config);
+        String value = (raw == null || raw.trim().isEmpty()) ? fallback : raw.trim();
+        
+        int plus = value.indexOf('+');
+        String modifier = plus > 0 ? value.substring(0, plus).trim() : "";
+        String letter = plus >= 0 ? value.substring(plus + 1).trim() : value;
+        
+        if (!"Alt".equalsIgnoreCase(modifier)
+                || letter.length() != 1 || !Character.isLetter(letter.charAt(0))) {
+            logger.warn("[热键] {} 的值 '{}' 不是 Alt+字母 形式，回退默认 {}", config.key, raw, fallback);
+            letter = fallback.substring(fallback.indexOf('+') + 1);
+        }
+        return Character.toUpperCase(letter.charAt(0));
+    }
+    
+    /** JNativeHook 的键码常量名就是 VC_ + 大写字母，直接查字段比维护 26 项映射表省事。 */
+    private static int nativeKeyCodeOf(char letter) {
+        try {
+            return NativeKeyEvent.class.getField("VC_" + letter).getInt(null);
+        } catch (ReflectiveOperationException e) {
+            logger.warn("[热键] 无法解析键码 VC_{}，该热键在 JNativeHook 下不可用", letter);
+            return -1;
+        }
     }
     
     /**
@@ -133,14 +192,10 @@ public class HotKeyManager {
         try {
             logger.debug("尝试初始化JIntellitype...");
             
-            // 注册热键（Alt 系列）
-            JIntellitype.getInstance().registerHotKey(HOTKEY_SHOW_NORMAL, JIntellitype.MOD_ALT, (int)'N');
-            JIntellitype.getInstance().registerHotKey(HOTKEY_SHOW_MAX, JIntellitype.MOD_ALT, (int)'M');
-            JIntellitype.getInstance().registerHotKey(HOTKEY_MINIMIZE, JIntellitype.MOD_ALT, (int)'L');
-            JIntellitype.getInstance().registerHotKey(HOTKEY_EXIT, JIntellitype.MOD_ALT, (int)'Q');
-            JIntellitype.getInstance().registerHotKey(HOTKEY_SYNC, JIntellitype.MOD_ALT, (int)'S');
-            JIntellitype.getInstance().registerHotKey(HOTKEY_PULL, JIntellitype.MOD_ALT, (int)'U');
-            // （撤回）不注册 Ctrl 系列
+            // 注册热键（Alt 系列，字母来自配置）
+            for (int i = 0; i < HOTKEY_IDS.length; i++) {
+                JIntellitype.getInstance().registerHotKey(HOTKEY_IDS[i], JIntellitype.MOD_ALT, (int) hotKeyLetters[i]);
+            }
             
             // 添加热键监听器
             JIntellitype.getInstance().addHotKeyListener(new HotkeyListener() {
@@ -164,51 +219,31 @@ public class HotKeyManager {
      * 处理JNativeHook按键事件
      */
     private void handleJNativeHookKeyPress(NativeKeyEvent e) {
-        // 检查Alt键和Ctrl键是否按下
         boolean altPressed = (e.getModifiers() & NativeKeyEvent.ALT_MASK) != 0;
-        boolean ctrlPressed = (e.getModifiers() & NativeKeyEvent.CTRL_MASK) != 0;
+        if (!altPressed) {
+            return;
+        }
         
-        if (altPressed) {
-            logger.info("[热键] 检测到Alt组合键: Alt + {}", NativeKeyEvent.getKeyText(e.getKeyCode()));
-            
-            switch (e.getKeyCode()) {
-                case NativeKeyEvent.VC_N:
-                    logger.info("[热键] 执行Alt+N: 恢复窗口");
-                    showWindowNormal();
-                    break;
-                case NativeKeyEvent.VC_M:
-                    logger.info("[热键] 执行Alt+M: 最大化窗口");
-                    showWindowMaximized();
-                    break;
-                case NativeKeyEvent.VC_L:
-                    logger.info("[热键] 执行Alt+L: 最小化窗口");
-                    minimizeWindow();
-                    break;
-                case NativeKeyEvent.VC_Q:
-                    logger.info("[热键] 执行Alt+Q: 退出程序");
-                    exitApplication();
-                    break;
-                case NativeKeyEvent.VC_S:
-                    logger.info("[热键] 检测到 Alt+S 按键，开始上传");
-                    syncToCloud();
-                    break;
-                case NativeKeyEvent.VC_U:
-                    logger.info("[热键] 检测到 Alt+U 按键，开始下载");
-                    pullFromCloud();
-                    break;
-                // Alt+P 不作为全局热键处理（预览仅在应用内快捷键生效）
-                default:
-                    logger.info("[热键] 未处理的Alt组合键: {}", NativeKeyEvent.getKeyText(e.getKeyCode()));
-                    break;
+        int keyCode = e.getKeyCode();
+        for (int i = 0; i < nativeKeyCodes.length; i++) {
+            if (nativeKeyCodes[i] == keyCode) {
+                logger.info("[热键] 执行 Alt+{}: {}", hotKeyLetters[i], HOTKEY_LABELS[i]);
+                runHotKeyAction(HOTKEY_IDS[i]);
+                return;
             }
         }
-        // （撤回）Ctrl 系列不再作为全局热键
+        logger.info("[热键] 未处理的Alt组合键: {}", NativeKeyEvent.getKeyText(keyCode));
     }
     
     /**
      * 处理JIntellitype热键事件
      */
     private void handleJIntellitypeHotKey(int identifier) {
+        runHotKeyAction(identifier);
+    }
+    
+    /** 两个后端最终都走这里，identifier 即 HOTKEY_* 标识。 */
+    private void runHotKeyAction(int identifier) {
         switch (identifier) {
             case HOTKEY_SHOW_NORMAL:
                 showWindowNormal();
@@ -234,7 +269,7 @@ public class HotKeyManager {
 
     /**
      * 同步数据库到云端（上传）
-     * 防抖：正在执行中或 3 秒冷却期内，直接跳过
+     * 防抖：正在执行中或 sync.cooldown.ms 冷却期内，直接跳过
      */
     private void syncToCloud() {
         // 防重：正在执行中，直接跳过
@@ -243,8 +278,9 @@ public class HotKeyManager {
             return;
         }
         
-        // 冷却期：距上次完成不到 3 秒，跳过
-        if (System.currentTimeMillis() - lastSyncFinishedAt < SYNC_COOLDOWN_MS) {
+        // 冷却期：距上次完成不到 sync.cooldown.ms，跳过
+        if (System.currentTimeMillis() - lastSyncFinishedAt
+                < AppConfig.getInstance().getLong(ConfigKeys.SYNC_COOLDOWN_MS)) {
             logger.info("[上传] 冷却期内，跳过");
             syncInProgress.set(false);
             UnifiedNoteAppFrame af = UnifiedNoteAppFrame.getActiveInstance();
@@ -296,7 +332,7 @@ public class HotKeyManager {
 
     /**
      * 从云端下载数据库（下载）
-     * 防抖：正在执行中或 3 秒冷却期内，直接跳过
+     * 防抖：正在执行中或 sync.cooldown.ms 冷却期内，直接跳过
      */
     private void pullFromCloud() {
         // 防重：正在执行中，直接跳过
@@ -305,8 +341,9 @@ public class HotKeyManager {
             return;
         }
         
-        // 冷却期：距上次完成不到 3 秒，跳过
-        if (System.currentTimeMillis() - lastPullFinishedAt < SYNC_COOLDOWN_MS) {
+        // 冷却期：距上次完成不到 sync.cooldown.ms，跳过
+        if (System.currentTimeMillis() - lastPullFinishedAt
+                < AppConfig.getInstance().getLong(ConfigKeys.SYNC_COOLDOWN_MS)) {
             logger.info("[下载] 冷却期内，跳过");
             pullInProgress.set(false);
             UnifiedNoteAppFrame af = UnifiedNoteAppFrame.getActiveInstance();
@@ -485,8 +522,7 @@ public class HotKeyManager {
      */
     private void printJNativeHookHotkeys() {
         logger.info("=== JNativeHook全局热键 ===");
-        logger.info("Alt+N: 显示/恢复, Alt+M: 最大化, Alt+L: 最小化, Alt+Q: 退出");
-        logger.info("Alt+S: 上传云端, Alt+U: 从云端下载");
+        printHotKeyBindings();
     }
     
     /**
@@ -494,7 +530,15 @@ public class HotKeyManager {
      */
     private void printJIntellitypeHotkeys() {
         logger.info("=== JIntellitype全局热键 ===");
-        logger.info("Alt+N: 显示/恢复, Alt+M: 最大化, Alt+L: 最小化, Alt+Q: 退出");
-        logger.info("Alt+S: 上传云端, Alt+U: 从云端下载");
+        printHotKeyBindings();
+    }
+    
+    private void printHotKeyBindings() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < HOTKEY_CONFIGS.length; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append("Alt+").append(hotKeyLetters[i]).append(": ").append(HOTKEY_LABELS[i]);
+        }
+        logger.info(sb.toString());
     }
 }
