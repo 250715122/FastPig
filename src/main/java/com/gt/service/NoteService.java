@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
  * - 加载：从索引查元数据，从文件读正文
  * - 搜索：查询索引返回结果
  */
-public class NoteService {
+public class NoteService implements AutoCloseable {
 
     private static final Logger logger = LogManager.getLogger(NoteService.class);
     private static NoteService instance;
