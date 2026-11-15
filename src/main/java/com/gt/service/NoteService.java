@@ -21,6 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -491,12 +492,10 @@ public class NoteService {
         int deletedCount = 0;
         
         try {
-            // 获取数据库中所有笔记的 key
-            List<NoteDto> allNotes = repository.findAllCommandsAndDescriptions();
-            Set<String> dbKeys = allNotes.stream()
-                .map(n -> n.key)
-                .filter(k -> k != null)
-                .collect(Collectors.toSet());
+            // 获取数据库中所有笔记的 key。必须用 findAllKeys：
+            // findAllCommandsAndDescriptions 为生成 all 聚合而过滤掉 all 本身，
+            // 用它会把 all 每次都判成孤立笔记删掉，再被云同步下载回旧版本。
+            Set<String> dbKeys = new HashSet<>(repository.findAllKeys());
             
             logger.info("[NoteService] 数据库中有 {} 个笔记", dbKeys.size());
             

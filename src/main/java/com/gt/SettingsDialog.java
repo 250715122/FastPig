@@ -330,7 +330,8 @@ public class SettingsDialog extends JDialog {
         }
         Path notesDir = Paths.get(System.getProperty("user.dir"), "notes");
         VectorSearchManager.getInstance().rebuildAllIndex(notesDir, (current, total) ->
-            UnifiedNoteAppFrame.updateStartupStatus("正在重建向量索引 " + current + "/" + total + "..."));
+            UnifiedNoteAppFrame.updateStartupStatus("正在重建向量索引 " + current + "/" + total + "..."),
+            () -> UnifiedNoteAppFrame.updateStartupStatus("就绪"));
     }
     
     /**

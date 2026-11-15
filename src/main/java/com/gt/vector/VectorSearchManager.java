@@ -120,8 +120,7 @@ public class VectorSearchManager {
                 rebuildAllIndex(notesDir, (current, total) -> {
                     logger.debug("索引进度: {}/{}", current, total);
                     UnifiedNoteAppFrame.updateStartupStatus("正在创建向量索引 " + current + "/" + total + "...");
-                });
-                UnifiedNoteAppFrame.updateStartupStatus("就绪");
+                }, () -> UnifiedNoteAppFrame.updateStartupStatus("就绪"));
             } else {
                 UnifiedNoteAppFrame.updateStartupStatus("就绪");
             }
@@ -423,9 +422,13 @@ public class VectorSearchManager {
      *
      * @param notesDir 笔记目录
      * @param progressCallback 进度回调 (current, total)
+     * @param onComplete 结束回调，恰好触发一次。本方法是异步的，调用方不能在调用后立刻复位
+     *                   进度状态——那时重建还没开始，随后最后一次进度回调会把状态永久盖住。
+     *                   早退（服务不可用 / 已有重建在跑）也会触发，避免状态卡在「正在创建」。
      */
-    public void rebuildAllIndex(Path notesDir, BiConsumer<Integer, Integer> progressCallback) {
+    public void rebuildAllIndex(Path notesDir, BiConsumer<Integer, Integer> progressCallback, Runnable onComplete) {
         if (!isAvailable() || indexingInProgress) {
+            onComplete.run();
             return;
         }
 
@@ -488,6 +491,7 @@ public class VectorSearchManager {
                 logger.error("全量索引失败: {}", e.getMessage(), e);
             } finally {
                 indexingInProgress = false;
+                onComplete.run();
             }
         });
     }

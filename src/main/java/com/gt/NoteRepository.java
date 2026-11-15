@@ -364,6 +364,28 @@ public class NoteRepository {
     /**
      * 获取自指定时间以来更新的笔记（用于增量同步）
      */
+    /**
+     * 所有未删除笔记的 key，含保留键（如 all）。
+     *
+     * 清理孤立笔记必须用这个：{@link #findAllCommandsAndDescriptions()} 为了生成 all 聚合
+     * 而在 SQL 里过滤掉 all 本身，拿它当「数据库里有哪些笔记」会把 all 误判成孤立笔记删掉。
+     * 只取 key，不加载正文。
+     */
+    public List<String> findAllKeys() {
+        String sql = "SELECT key FROM snippets WHERE deleted=0 AND key IS NOT NULL";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ResultSet rs = ps.executeQuery();
+            List<String> keys = new ArrayList<>();
+            while (rs.next()) {
+                keys.add(rs.getString("key"));
+            }
+            return keys;
+        } catch (SQLException e) {
+            throw new RuntimeException("查询笔记 key 列表失败: " + e.getMessage(), e);
+        }
+    }
+
     public List<NoteDto> findUpdatedSince(long timestamp) {
         String sql = "SELECT * FROM snippets WHERE updated_at > ? ORDER BY updated_at DESC";
         try (Connection conn = getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {

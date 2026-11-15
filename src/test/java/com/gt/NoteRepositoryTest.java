@@ -40,6 +40,29 @@ public class NoteRepositoryTest {
     }
 
     @Test
+    public void findAllKeysKeepsReservedAllKey() {
+        NoteRepository repo = new NoteRepository(tempDir.resolve("keys.db").toString());
+        repo.save(newNote("all"));
+        repo.save(newNote("mysql"));
+
+        // findAllCommandsAndDescriptions 是「用于生成 all 聚合」的查询，故意排除 all 本身
+        assertFalse(repo.findAllCommandsAndDescriptions().stream().anyMatch(n -> "all".equals(n.key)));
+        // 清理孤立笔记必须用不带过滤的 key 列表，否则 all 每次启动都被误判成孤立笔记删掉
+        assertTrue(repo.findAllKeys().containsAll(Arrays.asList("all", "mysql")));
+    }
+
+    @Test
+    public void findAllKeysSkipsDeletedNotes() {
+        NoteRepository repo = new NoteRepository(tempDir.resolve("keys-deleted.db").toString());
+        repo.save(newNote("live"));
+        NoteDto gone = newNote("gone");
+        gone.deleted = true;
+        repo.save(gone);
+
+        assertEquals(List.of("live"), repo.findAllKeys());
+    }
+
+    @Test
     public void testSaveAndSearch() {
         String db = tempDir.resolve("test-fastpig.db").toString();
         NoteRepository repo = new NoteRepository(db);
