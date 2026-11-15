@@ -118,6 +118,14 @@ public class SingleFileBlockRepository implements BlockRepository, AutoCloseable
         catalog.replaceNote(noteKey, listBlocks(noteKey));
     }
 
+    /**
+     * 块 ID 是否已被别的笔记占用，供保存时补 ID 去重。
+     * 目录还没建立过时查不到，一律返回 false：补 ID 是尽力而为，不该阻塞保存。
+     */
+    public boolean isIdTakenByOtherNote(String blockId, String noteKey) {
+        return catalog.findNoteKey(blockId).filter(k -> !k.equals(noteKey)).isPresent();
+    }
+
     /** 让目录与文件重新对齐，返回处理过的笔记数。 */
     public int refreshCatalog() {
         int n = 0;

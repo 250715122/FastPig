@@ -23,11 +23,20 @@ import java.util.regex.Pattern;
 public final class BlockIdAssigner {
 
     /**
-     * @param insertedLines 新增 ID 行的行号（0 起，升序），供编辑器按插入点修正光标
+     * @param insertions 新增的 ID 行，按原正文行号升序。text 是待插入的原文（含行尾符），
+     *                   编辑器直接插回去即可，不必自己猜行尾符；光标由 Swing 的 Position 自动顺延。
      */
-    public record Result(String body, int assigned, int reassigned, List<Integer> insertedLines) {
+    public record Result(String body, int assigned, int reassigned, List<Insertion> insertions) {
+        /** line 为插入点在原正文中的行号（0 起），等于原正文行数时表示追加到文末。 */
+        public record Insertion(int line, String text) {
+        }
+
         public Result {
-            insertedLines = List.copyOf(insertedLines);
+            insertions = List.copyOf(insertions);
+        }
+
+        public List<Integer> insertedLines() {
+            return insertions.stream().map(Insertion::line).toList();
         }
 
         public boolean changed() {
@@ -56,9 +65,45 @@ public final class BlockIdAssigner {
         Set<String> seen = new HashSet<>();
 
         int reassigned = replaceConflictingIds(lines, inCode, out, seen, taken);
-        List<Integer> inserted = insertMissingIds(noteKey, noteDesc, body, profile, lines, out, seen, taken);
+        List<Result.Insertion> inserted = insertMissingIds(noteKey, noteDesc, body, profile, lines, out, seen, taken);
 
         return new Result(out.join(), inserted.size(), reassigned, inserted);
+    }
+
+    /**
+     * 补 ID 的不变量：只允许增删 ID 注释行，正文其余部分必须逐字不变（含行尾符）。
+     * 迁移工具和保存路径都在落盘前用它自检，不通过就别写。
+     */
+    public static boolean preservesText(String before, String after) {
+        return stripIds(before).equals(stripIds(after));
+    }
+
+    private static final Pattern EOL = Pattern.compile("\r\n|\r|\n");
+
+    private static String stripIds(String text) {
+        StringBuilder sb = new StringBuilder();
+        Matcher m = EOL.matcher(text);
+        int pos = 0;
+        while (m.find()) {
+            String line = text.substring(pos, m.start());
+            if (BlockIdCodec.parse(line).isEmpty()) {
+                sb.append(line).append(m.group());
+            }
+            pos = m.end();
+        }
+        String tail = text.substring(pos);
+        if (BlockIdCodec.parse(tail).isEmpty()) {
+            sb.append(tail);
+        } else {
+            // 追加在文末的 ID 行会给上一行补一个行尾符，撤销 ID 时一并撤销它
+            int len = sb.length();
+            if (len >= 2 && sb.charAt(len - 2) == '\r' && sb.charAt(len - 1) == '\n') {
+                sb.setLength(len - 2);
+            } else if (len > 0 && (sb.charAt(len - 1) == '\n' || sb.charAt(len - 1) == '\r')) {
+                sb.setLength(len - 1);
+            }
+        }
+        return sb.toString();
     }
 
     private static int replaceConflictingIds(String[] lines, boolean[] inCode, Lines out,
@@ -85,9 +130,9 @@ public final class BlockIdAssigner {
         return reassigned;
     }
 
-    private static List<Integer> insertMissingIds(String noteKey, String noteDesc, String body, ChunkProfile profile,
-                                                  String[] lines, Lines out, Set<String> seen,
-                                                  Predicate<String> taken) {
+    private static List<Result.Insertion> insertMissingIds(String noteKey, String noteDesc, String body,
+                                                           ChunkProfile profile, String[] lines, Lines out,
+                                                           Set<String> seen, Predicate<String> taken) {
         List<Integer> insertions = new ArrayList<>();
         for (KnowledgeBlock block : CHUNKER.chunk(noteKey, noteDesc, body, profile)) {
             if (BlockIdCodec.isValidId(block.id())) {
@@ -105,14 +150,18 @@ public final class BlockIdAssigner {
         }
         // 从后往前插，前面的行号才不会被已插入的行推偏
         insertions.sort(Comparator.reverseOrder());
-        List<Integer> inserted = new ArrayList<>();
+        List<Result.Insertion> inserted = new ArrayList<>();
         for (int at : insertions) {
             String fresh = BlockIdGenerator.next(taken.or(seen::contains));
             seen.add(fresh);
-            out.insert(at, BlockIdCodec.format(fresh), out.separatorAt(at));
-            inserted.add(at);
+            String idLine = BlockIdCodec.format(fresh);
+            String separator = out.separatorAt(at);
+            // 文末追加时上一行会被补一个行尾符，等价于在正文末尾插入"行尾符 + ID 行"
+            String text = out.appendsEol(at) ? out.eol + idLine : idLine + separator;
+            out.insert(at, idLine, separator);
+            inserted.add(new Result.Insertion(at, text));
         }
-        inserted.sort(Comparator.naturalOrder());
+        inserted.sort(Comparator.comparingInt(Result.Insertion::line));
         return inserted;
     }
 
@@ -123,8 +172,6 @@ public final class BlockIdAssigner {
      * 统一用一种行尾符重新拼接会悄悄改掉正文，迁移自检会因此整篇拒绝落盘。
      */
     private static final class Lines {
-        private static final Pattern EOL = Pattern.compile("\r\n|\r|\n");
-
         final List<String> text = new ArrayList<>();
         final List<String> sep = new ArrayList<>();
         String eol = "\n";
@@ -148,9 +195,13 @@ public final class BlockIdAssigner {
             text.set(i, line);
         }
 
+        /** 文末追加 ID 行时，上一行原本没有行尾符，必须补一个，否则 ID 会粘在正文后面。 */
+        boolean appendsEol(int i) {
+            return i == text.size() && i > 0 && sep.get(i - 1).isEmpty();
+        }
+
         void insert(int i, String line, String separator) {
-            if (i == text.size() && i > 0 && sep.get(i - 1).isEmpty()) {
-                // 文末追加 ID 行：上一行原本没有行尾符，不补一个的话 ID 会粘在正文后面
+            if (appendsEol(i)) {
                 sep.set(i - 1, eol);
             }
             text.add(i, line);

@@ -48,6 +48,8 @@ import org.apache.logging.log4j.Logger;
 
 import com.gt.config.ConfigKeys;
 import com.gt.kb.TaxonomyGuesser;
+import com.gt.kb.id.BlockIdAssigner;
+import com.gt.kb.id.BlockIdEditorSync;
 import com.gt.vector.VectorSearchManager;
 import com.gt.vector.NoteH1Parser;
 
@@ -2487,19 +2489,12 @@ public class UnifiedNoteAppFrame extends JFrame {
             n.topic = guess.topic();
         }
         // 使用 NoteService 保存（同时写入文件和索引）
-        noteService.save(n);
+        BlockIdAssigner.Result ids = noteService.save(n);
         // 只更新 current，不重新加载文本
         current = n;
         updateEditorStatus();
+        syncEditorAfterSave(ids, selectionStart, selectionEnd);
         refineClassificationAsync(n, bodyArea.getText());
-        // 恢复选区状态
-        try {
-            int textLength = bodyArea.getText().length();
-            int start = Math.min(selectionStart, textLength);
-            int end = Math.min(selectionEnd, textLength);
-            bodyArea.setSelectionStart(start);
-            bodyArea.setSelectionEnd(end);
-        } catch (Exception ignored) {}
     }
 
     private void updateCurrent(boolean manual) {
@@ -2526,16 +2521,36 @@ public class UnifiedNoteAppFrame extends JFrame {
         current.updatedAt = System.currentTimeMillis();
         current.version = Math.max(1, current.version + 1);
         // 使用 NoteService 保存（同时写入文件和索引）
-        noteService.save(current);
+        BlockIdAssigner.Result ids = noteService.save(current);
         // 只更新状态，不重新加载文本
         updateEditorStatus();
-        // 恢复选区状态
+        syncEditorAfterSave(ids, selectionStart, selectionEnd);
+    }
+
+    /**
+     * 保存后对齐编辑区与落盘正文。
+     *
+     * 补了块 ID 就必须把新行插回去：编辑区留着没有 ID 的旧文本，下次保存会再分配一批新 ID。
+     * 插入用 Document.insertString，光标和选区由 Swing 的 Position 自动顺延，
+     * 不能再按保存前的裸偏移恢复——那些偏移已经被插入的行推偏了。
+     */
+    private void syncEditorAfterSave(BlockIdAssigner.Result ids, int selectionStart, int selectionEnd) {
+        if (ids.changed()) {
+            boolean loading = isLoading;
+            isLoading = true; // 回填 ID 不是用户编辑，不该再触发一轮自动保存
+            try {
+                BlockIdEditorSync.apply(bodyArea, ids);
+            } catch (Exception e) {
+                logger.warn("[块ID] 编辑区回填失败: {}", e.getMessage());
+            } finally {
+                isLoading = loading;
+            }
+            return;
+        }
         try {
             int textLength = bodyArea.getText().length();
-            int start = Math.min(selectionStart, textLength);
-            int end = Math.min(selectionEnd, textLength);
-            bodyArea.setSelectionStart(start);
-            bodyArea.setSelectionEnd(end);
+            bodyArea.setSelectionStart(Math.min(selectionStart, textLength));
+            bodyArea.setSelectionEnd(Math.min(selectionEnd, textLength));
         } catch (Exception ignored) {}
     }
 

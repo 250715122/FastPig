@@ -130,35 +130,7 @@ public final class BlockIdMigration {
 
     /** 安全自检：补 ID 只允许增删 ID 注释行，正文其余部分必须逐字不变（含行尾符）。 */
     static boolean sameTextIgnoringIds(String before, String after) {
-        return stripIds(before).equals(stripIds(after));
-    }
-
-    private static final Pattern EOL = Pattern.compile("\r\n|\r|\n");
-
-    private static String stripIds(String text) {
-        StringBuilder sb = new StringBuilder();
-        Matcher m = EOL.matcher(text);
-        int pos = 0;
-        while (m.find()) {
-            String line = text.substring(pos, m.start());
-            if (BlockIdCodec.parse(line).isEmpty()) {
-                sb.append(line).append(m.group());
-            }
-            pos = m.end();
-        }
-        String tail = text.substring(pos);
-        if (BlockIdCodec.parse(tail).isEmpty()) {
-            sb.append(tail);
-        } else {
-            // 追加在文末的 ID 行会给上一行补一个行尾符，撤销 ID 时一并撤销它
-            int len = sb.length();
-            if (len >= 2 && sb.charAt(len - 2) == '\r' && sb.charAt(len - 1) == '\n') {
-                sb.setLength(len - 2);
-            } else if (len > 0 && (sb.charAt(len - 1) == '\n' || sb.charAt(len - 1) == '\r')) {
-                sb.setLength(len - 1);
-            }
-        }
-        return sb.toString();
+        return BlockIdAssigner.preservesText(before, after);
     }
 
     private static String bumpVersion(String front) {

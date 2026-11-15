@@ -1,8 +1,12 @@
 package com.gt.service;
 
+import com.gt.AppConfig;
 import com.gt.NoteDto;
 import com.gt.NoteRepository;
+import com.gt.config.ConfigKeys;
 import com.gt.crypto.NoteEncryptionService;
+import com.gt.kb.chunk.ChunkProfile;
+import com.gt.kb.id.BlockIdAssigner;
 import com.gt.kb.repo.BlockCatalog;
 import com.gt.kb.repo.BlockRepository;
 import com.gt.kb.repo.SingleFileBlockRepository;
@@ -68,14 +72,19 @@ public class NoteService {
     /**
      * 保存笔记
      * 同时写入文件和更新索引
+     *
+     * @return 本次补块 ID 的结果，调用方（编辑器）据此把新增的 ID 行插回编辑区
      */
-    public void save(NoteDto note) {
+    public BlockIdAssigner.Result save(NoteDto note) {
         if (note == null || note.id == null) {
             throw new IllegalArgumentException("笔记或笔记ID不能为空");
         }
 
         // 自动递增版本号
         autoIncrementVersion(note);
+
+        // 补 ID 必须在算哈希之前：哈希要对应真正落盘的正文
+        BlockIdAssigner.Result ids = assignBlockIds(note);
 
         // 内容哈希按明文计算：密文每次保存都换新 IV，用密文算哈希会让同步永远认为有变更
         note.contentHash = computeHash(note.bodyMd);
@@ -127,6 +136,35 @@ public class NoteService {
 
         logger.info("[NoteService] 已保存笔记: " + note.key + " (id=" + note.id + ", version=" + note.version
                 + (note.encrypted ? ", encrypted" : "") + ")");
+        return ids;
+    }
+
+    /**
+     * 落盘前给无 ID 的知识块补 ID，并换掉重复/被别的笔记占用的 ID。
+     *
+     * 私密笔记跳过：正文马上要换成密文，ID 行写进去也切不出块。
+     * 补 ID 只是派生信息，失败或自检不通过都按原文保存，绝不能因此丢掉用户正文。
+     */
+    private BlockIdAssigner.Result assignBlockIds(NoteDto note) {
+        String body = note.bodyMd;
+        BlockIdAssigner.Result unchanged = new BlockIdAssigner.Result(body, 0, 0, List.of());
+        if (note.encrypted || !AppConfig.getInstance().getBoolean(ConfigKeys.KB_ID_AUTO_ASSIGN)) {
+            return unchanged;
+        }
+        try {
+            BlockIdAssigner.Result result = BlockIdAssigner.assign(note.key, note.desc, body,
+                    ChunkProfile.forNote(note.noteType, note.layer),
+                    id -> blockRepository.isIdTakenByOtherNote(id, note.key));
+            if (result.changed() && !BlockIdAssigner.preservesText(body, result.body())) {
+                logger.error("[NoteService] 补块 ID 会改动正文，已放弃: {}", note.key);
+                return unchanged;
+            }
+            note.bodyMd = result.body();
+            return result;
+        } catch (RuntimeException e) {
+            logger.warn("[NoteService] 补块 ID 失败，按原文保存: {} - {}", note.key, e.getMessage());
+            return unchanged;
+        }
     }
 
     /**
