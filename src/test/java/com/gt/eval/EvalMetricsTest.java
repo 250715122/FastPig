@@ -18,51 +18,72 @@ class EvalMetricsTest {
     }
 
     private static EvalMetrics.Hit hit(String note, String title) {
-        return new EvalMetrics.Hit(note, title);
+        return new EvalMetrics.Hit(note, title, title);
+    }
+
+    private static EvalMetrics.Hit section(String note, String blockTitle, String sectionTitle) {
+        return new EvalMetrics.Hit(note, blockTitle, sectionTitle);
+    }
+
+    @Test
+    void sectionTitleOnlyCountsUnderLooseCriterion() {
+        List<EvalMetrics.Hit> ranked = List.of(section("rabbitmq", "Centos7安装RabbitMQ", "配置shovel"));
+        List<EvalQueries.Expect> expect = List.of(block("rabbitmq", "配置shovel"));
+        assertEquals(0, EvalMetrics.firstHitRank(ranked, expect, false), "主口径只认知识块标题");
+        assertEquals(1, EvalMetrics.firstHitRank(ranked, expect, true));
+        assertEquals(1, EvalMetrics.firstHitRank(ranked,
+                List.of(block("rabbitmq", "Centos7安装RabbitMQ")), false));
+        assertEquals(0, EvalMetrics.firstHitRank(ranked, List.of(block("rabbitmq", "创建用户")), true));
+    }
+
+    @Test
+    void sectionOfAnotherNoteNeverMatches() {
+        List<EvalMetrics.Hit> ranked = List.of(section("flinkbs", "flinkcdc部署", "配置shovel"));
+        assertEquals(0, EvalMetrics.firstHitRank(ranked, List.of(block("rabbitmq", "配置shovel")), true));
     }
 
     @Test
     void rankIsOneBased() {
         List<EvalMetrics.Hit> ranked = List.of(hit("a", "x"), hit("linux", "占用空间"));
-        assertEquals(2, EvalMetrics.firstHitRank(ranked, List.of(block("linux", "占用空间"))));
+        assertEquals(2, EvalMetrics.firstHitRank(ranked, List.of(block("linux", "占用空间")), false));
     }
 
     @Test
     void noteLevelExpectMatchesAnyBlock() {
         List<EvalMetrics.Hit> ranked = List.of(hit("jvm", ""));
-        assertEquals(1, EvalMetrics.firstHitRank(ranked, List.of(note("jvm"))));
+        assertEquals(1, EvalMetrics.firstHitRank(ranked, List.of(note("jvm")), false));
     }
 
     @Test
     void noteNameBlockDoesNotSatisfyTitleExpect() {
         List<EvalMetrics.Hit> ranked = List.of(hit("linux", "__NOTE_NAME__"));
-        assertEquals(0, EvalMetrics.firstHitRank(ranked, List.of(block("linux", "占用空间"))));
-        assertEquals(1, EvalMetrics.firstHitRank(ranked, List.of(note("linux"))));
+        assertEquals(0, EvalMetrics.firstHitRank(ranked, List.of(block("linux", "占用空间")), false));
+        assertEquals(1, EvalMetrics.firstHitRank(ranked, List.of(note("linux")), false));
     }
 
     @Test
     void titleMustMatchExactly() {
         List<EvalMetrics.Hit> ranked = List.of(hit("linux", "占用空间"));
-        assertEquals(0, EvalMetrics.firstHitRank(ranked, List.of(block("linux", "占用"))));
-        assertEquals(0, EvalMetrics.firstHitRank(ranked, List.of(block("linux", "占用空间 "))));
+        assertEquals(0, EvalMetrics.firstHitRank(ranked, List.of(block("linux", "占用")), false));
+        assertEquals(0, EvalMetrics.firstHitRank(ranked, List.of(block("linux", "占用空间 ")), false));
     }
 
     @Test
     void wrongNoteNeverMatches() {
         List<EvalMetrics.Hit> ranked = List.of(hit("ubuntu", "占用空间"));
-        assertEquals(0, EvalMetrics.firstHitRank(ranked, List.of(block("linux", "占用空间"))));
+        assertEquals(0, EvalMetrics.firstHitRank(ranked, List.of(block("linux", "占用空间")), false));
     }
 
     @Test
     void expectsAreAlternatives() {
         List<EvalMetrics.Hit> ranked = List.of(hit("a", "x"), hit("b", "y"));
-        assertEquals(2, EvalMetrics.firstHitRank(ranked, List.of(block("c", "z"), block("b", "y"))));
+        assertEquals(2, EvalMetrics.firstHitRank(ranked, List.of(block("c", "z"), block("b", "y")), false));
     }
 
     @Test
     void missIsZero() {
-        assertEquals(0, EvalMetrics.firstHitRank(List.of(), List.of(note("a"))));
-        assertEquals(0, EvalMetrics.firstHitRank(List.of(hit("a", "x")), List.of(note("b"))));
+        assertEquals(0, EvalMetrics.firstHitRank(List.of(), List.of(note("a")), false));
+        assertEquals(0, EvalMetrics.firstHitRank(List.of(hit("a", "x")), List.of(note("b")), false));
     }
 
     @Test

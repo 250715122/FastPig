@@ -3,12 +3,14 @@ package com.gt.eval;
 import com.gt.NoteDto;
 import com.gt.config.ConfigKeys;
 import com.gt.AppConfig;
+import com.gt.kb.chunk.IndexBlocks;
+import com.gt.kb.model.KnowledgeBlock;
+import com.gt.kb.text.IndexTextBuilder;
 import com.gt.storage.NoteFileStorage;
 import com.gt.vector.EmbeddingService;
 import com.gt.vector.LuceneVectorSearchService;
-import com.gt.vector.LuceneVectorSearchService.H1BlockWithVector;
+import com.gt.vector.LuceneVectorSearchService.IndexedBlock;
 import com.gt.vector.LuceneVectorSearchService.VectorSearchResult;
-import com.gt.vector.NoteH1Parser;
 import com.gt.vector.VectorSearchFactory;
 
 import java.io.IOException;
@@ -17,7 +19,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -25,6 +29,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -39,6 +44,10 @@ import java.util.stream.Stream;
  *
  * 全程在真实笔记的副本上跑：把 notes 和 models 复制进工作目录，再把 user.dir 指过去，
  * 索引、配置、模型都落在工作目录里，绝不读写仓库根的 notes / vector_index / config.properties。
+ *
+ * 默认数据集是安装目录 {@code FastPig/notes}（应用实际在用、并同步到云端的那份），
+ * 不是仓库根的开发快照 {@code notes}；用 {@code --notes} 可显式覆盖。
+ * 每次运行都会把「数据集路径 + 篇数 + 最新修改日」写进明细和记录，跨数据集的数字不可直接对比。
  */
 public final class EvalRunner {
 
@@ -50,6 +59,8 @@ public final class EvalRunner {
     public static void main(String[] args) throws Exception {
         Path repo = Paths.get(System.getProperty("user.dir")).toAbsolutePath();
         Options o = Options.parse(args, repo);
+        o.dataset = describeDataset(repo, o.notes);
+        System.out.println("数据集: " + o.dataset);
 
         prepareWorkDir(o, repo);
         // 必须在 AppConfig / EmbeddingService / VectorSearchFactory 初始化之前改，
@@ -81,6 +92,7 @@ public final class EvalRunner {
         }
 
         List<EvalMetrics.Outcome> outcomes = new ArrayList<>();
+        List<EvalMetrics.Outcome> looseOutcomes = new ArrayList<>();
         List<String> detail = new ArrayList<>();
         long searchNanos = 0;
         for (EvalQueries.Query q : queries) {
@@ -90,23 +102,58 @@ public final class EvalRunner {
 
             List<EvalMetrics.Hit> hits = new ArrayList<>();
             for (VectorSearchResult r : results) {
-                hits.add(new EvalMetrics.Hit(r.noteKey, r.h1Title));
+                hits.add(new EvalMetrics.Hit(r.noteKey, r.h1Title, r.sectionTitle));
             }
-            int rank = EvalMetrics.firstHitRank(hits, q.expect());
+            int rank = EvalMetrics.firstHitRank(hits, q.expect(), false);
+            int looseRank = EvalMetrics.firstHitRank(hits, q.expect(), true);
             outcomes.add(new EvalMetrics.Outcome(q.id(), q.kind(), rank));
-            detail.add(detailOf(q, rank, results));
+            looseOutcomes.add(new EvalMetrics.Outcome(q.id(), q.kind(), looseRank));
+            detail.add(detailOf(q, rank, looseRank, results));
         }
 
         Map<String, EvalMetrics.Summary> groups = EvalMetrics.groupByKind(outcomes);
-        printSummary(groups, o);
-        writeDetail(o, queries.size(), groups, detail, searchNanos, svc.getIndexedCount(), rebuild);
-        appendRecord(o, groups);
+        EvalMetrics.Summary looseAll = EvalMetrics.summarize(looseOutcomes);
+        printSummary(groups, looseAll, o);
+        writeDetail(o, queries.size(), groups, looseAll, detail, searchNanos, svc.getIndexedCount(), rebuild);
+        appendRecord(o, groups, looseAll);
 
         svc.close();
         EmbeddingService.getInstance().close();
     }
 
     // ==================== 工作目录 ====================
+
+    /**
+     * 默认数据集取安装目录 {@code FastPig/notes}——那才是应用实际读写、并同步到云端的一份；
+     * 仓库根 {@code notes} 只是开发快照，可能落后数月。没有安装目录时才退回根 notes。
+     */
+    static Path resolveNotesDir(Path repo) {
+        Path installed = repo.resolve("FastPig").resolve("notes");
+        return Files.isDirectory(installed) ? installed : repo.resolve("notes");
+    }
+
+    /**
+     * 数据集身份戳：相对路径 + 篇数 + 最新修改日。
+     * 写进明细和记录，避免再出现「拿旧快照的数字当基线、跨数据集对比」而无人察觉。
+     */
+    static String describeDataset(Path repo, Path dir) throws IOException {
+        int count = 0;
+        long newest = 0;
+        try (Stream<Path> s = Files.walk(dir)) {
+            for (Path p : s.filter(x -> x.getFileName().toString().equals("note.md")).toList()) {
+                count++;
+                newest = Math.max(newest, Files.getLastModifiedTime(p).toMillis());
+            }
+        }
+        String day = newest == 0 ? "未知"
+                : LocalDate.ofInstant(Instant.ofEpochMilli(newest), ZoneId.systemDefault()).toString();
+        // 数据集可能在别的盘（临时目录里的副本），relativize 跨根会抛异常，这时只能报绝对路径
+        Path from = repo.toAbsolutePath().normalize();
+        Path to = dir.toAbsolutePath().normalize();
+        String rel = (Objects.equals(from.getRoot(), to.getRoot()) ? from.relativize(to) : to)
+                .toString().replace('\\', '/');
+        return rel + " " + count + " 篇，最新 " + day;
+    }
 
     private static void prepareWorkDir(Options o, Path repo) throws IOException {
         if (o.work.equals(repo)) {
@@ -120,9 +167,14 @@ public final class EvalRunner {
         copyTree(o.notes, o.work.resolve("notes"));
         copyModelIfNeeded(repo.resolve("models"), o.work.resolve("models"));
 
-        // 只写 provider，其余全部走 ConfigKeys 默认值，这样默认值调整能反映到评测里
-        Files.writeString(o.work.resolve("config.properties"), "vector.provider=lucene\n", StandardCharsets.UTF_8);
+        // 只写 provider 与显式覆盖项，其余全部走 ConfigKeys 默认值，这样默认值调整能反映到评测里
+        StringBuilder config = new StringBuilder("vector.provider=lucene\n");
+        o.overrides.forEach((k, v) -> config.append(k).append('=').append(v).append('\n'));
+        Files.writeString(o.work.resolve("config.properties"), config.toString(), StandardCharsets.UTF_8);
         System.out.println("工作目录: " + o.work);
+        if (!o.overrides.isEmpty()) {
+            System.out.println("配置覆盖: " + o.overrides);
+        }
     }
 
     private static void copyTree(Path src, Path dst) throws IOException {
@@ -168,19 +220,18 @@ public final class EvalRunner {
     private static Map<String, Set<String>> titlesByNote(List<NoteDto> notes) {
         Map<String, Set<String>> map = new HashMap<>();
         for (NoteDto n : notes) {
-            if (n.deleted || n.encrypted || n.key == null) {
+            List<KnowledgeBlock> blocks = IndexBlocks.of(n);
+            if (blocks.isEmpty()) {
                 continue;
             }
             Set<String> set = map.computeIfAbsent(n.key, k -> new HashSet<>());
-            for (NoteH1Parser.H1Block b : NoteH1Parser.parse(n.key, descOf(n), n.bodyMd)) {
-                set.add(b.h1Title);
+            for (KnowledgeBlock b : blocks) {
+                // 校验口径必须和命中判定一致：知识块标题与其下小节标题都算合法 expect
+                set.add(IndexBlocks.blockTitleOf(b));
+                set.add(b.title());
             }
         }
         return map;
-    }
-
-    private static String descOf(NoteDto n) {
-        return n.desc == null || n.desc.isEmpty() ? n.key : n.desc;
     }
 
     /** expect 写错笔记名或标题会静默变成「未命中」，把基线数据污染掉，所以先硬校验。 */
@@ -206,19 +257,19 @@ public final class EvalRunner {
     private static void buildIndex(LuceneVectorSearchService svc, List<NoteDto> notes) {
         long t0 = System.currentTimeMillis();
         svc.clearAll();
-        List<H1BlockWithVector> batch = new ArrayList<>();
+        List<IndexedBlock> batch = new ArrayList<>();
         int done = 0;
         int skipped = 0;
         for (NoteDto n : notes) {
-            if (n.deleted || n.encrypted) {
+            List<KnowledgeBlock> blocks = IndexBlocks.of(n);
+            if (blocks.isEmpty()) {
                 skipped++;
                 continue;
             }
-            for (NoteH1Parser.H1Block b : NoteH1Parser.parse(n.key, descOf(n), n.bodyMd)) {
-                float[] vector = EmbeddingService.getInstance().embed(b.indexContent);
+            for (KnowledgeBlock b : blocks) {
+                float[] vector = EmbeddingService.getInstance().embed(IndexTextBuilder.build(b));
                 if (vector != null) {
-                    batch.add(new H1BlockWithVector(b.noteKey, b.noteDesc, b.h1Title, b.indexContent,
-                            b.dupIndex, b.blockHash, vector));
+                    batch.add(new IndexedBlock(n, b, vector));
                 }
                 if (batch.size() >= BATCH_FLUSH_SIZE) {
                     svc.batchWriteWithVectors(null, batch);
@@ -240,19 +291,26 @@ public final class EvalRunner {
 
     // ==================== 输出 ====================
 
-    private static void printSummary(Map<String, EvalMetrics.Summary> groups, Options o) {
+    private static void printSummary(Map<String, EvalMetrics.Summary> groups, EvalMetrics.Summary looseAll, Options o) {
         System.out.println();
         System.out.println("== " + o.label + "  topK=" + o.topK + " ==");
         System.out.printf("%-12s %5s %8s %8s %8s%n", "分组", "条数", "R@5", "R@10", "MRR");
         groups.forEach((kind, s) -> System.out.printf("%-12s %5d %8.3f %8.3f %8.3f%n",
                 kind, s.total(), s.recallAt5(), s.recallAt10(), s.mrr()));
+        System.out.println("主口径只认知识块标题，与历史各版本可比。");
+        System.out.printf("含小节口径（全部）: R@5=%.3f R@10=%.3f MRR=%.3f%n",
+                looseAll.recallAt5(), looseAll.recallAt10(), looseAll.mrr());
         System.out.println();
     }
 
-    private static String detailOf(EvalQueries.Query q, int rank, List<VectorSearchResult> results) {
+    private static String detailOf(EvalQueries.Query q, int rank, int looseRank, List<VectorSearchResult> results) {
         StringBuilder sb = new StringBuilder();
         sb.append("### ").append(q.id()).append("  [").append(q.kind()).append("]  ")
-                .append(rank > 0 ? "命中于第 " + rank + " 位" : "未命中").append('\n');
+                .append(rank > 0 ? "命中于第 " + rank + " 位" : "未命中");
+        if (looseRank != rank) {
+            sb.append("（含小节口径：").append(looseRank > 0 ? "第 " + looseRank + " 位" : "仍未命中").append("）");
+        }
+        sb.append('\n');
         sb.append("- 查询: ").append(q.text()).append('\n');
         sb.append("- 期望: ");
         List<String> parts = new ArrayList<>();
@@ -260,13 +318,15 @@ public final class EvalRunner {
             parts.add(e.noteLevel() ? e.note() : e.note() + " / " + e.title());
         }
         sb.append(String.join(" 或 ", parts)).append('\n');
-        sb.append("- 实际:\n");
-        int n = Math.min(3, results.size());
-        for (int i = 0; i < n; i++) {
+        sb.append("- 实际（全部 ").append(results.size()).append(" 条）:\n");
+        for (int i = 0; i < results.size(); i++) {
             VectorSearchResult r = results.get(i);
-            sb.append("  ").append(i + 1).append(". ").append(r.noteKey).append(" / ")
-                    .append(r.h1Title == null || r.h1Title.isEmpty() ? "(无标题)" : r.h1Title)
-                    .append(String.format("  [%.4f]", r.totalScore)).append('\n');
+            String title = r.h1Title == null || r.h1Title.isEmpty() ? "(无标题)" : r.h1Title;
+            if (!r.sectionTitle.isEmpty() && !r.sectionTitle.equals(r.h1Title)) {
+                title += " > " + r.sectionTitle;
+            }
+            sb.append("  ").append(i + 1).append(". ").append(r.noteKey).append(" / ").append(title)
+                    .append(String.format("  [%.4f %s]", r.score, r.channels)).append('\n');
         }
         if (results.isEmpty()) {
             sb.append("  (无结果)\n");
@@ -275,11 +335,16 @@ public final class EvalRunner {
     }
 
     private static void writeDetail(Options o, int queryCount, Map<String, EvalMetrics.Summary> groups,
-                                    List<String> detail, long searchNanos, int indexedCount, boolean rebuilt)
+                                    EvalMetrics.Summary looseAll, List<String> detail, long searchNanos,
+                                    int indexedCount, boolean rebuilt)
             throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("# 评测明细 ").append(o.label).append("  ").append(LocalDate.now()).append("\n\n");
         sb.append("- 改动: ").append(o.change).append('\n');
+        if (!o.overrides.isEmpty()) {
+            sb.append("- 配置覆盖: ").append(o.overrides).append('\n');
+        }
+        sb.append("- 数据集: ").append(o.dataset).append('\n');
         sb.append("- 查询数: ").append(queryCount).append("，topK=").append(o.topK).append('\n');
         sb.append("- 索引条数: ").append(indexedCount).append(rebuilt ? "（本次重建）" : "（复用）").append('\n');
         sb.append("- 检索总耗时: ").append(searchNanos / 1_000_000).append("ms，平均 ")
@@ -287,14 +352,19 @@ public final class EvalRunner {
         sb.append("- 生效配置: ");
         List<String> cfg = new ArrayList<>();
         for (ConfigKeys k : new ConfigKeys[]{ConfigKeys.SEARCH_HUMAN_TOPK, ConfigKeys.SEARCH_HUMAN_PER_NOTE,
-                ConfigKeys.SEARCH_OVERFETCH, ConfigKeys.INDEX_CONTENT_MAX_CHARS, ConfigKeys.MODEL_MAX_TOKENS}) {
+                ConfigKeys.SEARCH_HUMAN_CANDIDATES, ConfigKeys.SEARCH_RRF_K,
+                ConfigKeys.SEARCH_RRF_WEIGHT_EXACT, ConfigKeys.SEARCH_RRF_WEIGHT_BM25,
+                ConfigKeys.SEARCH_RRF_WEIGHT_VECTOR, ConfigKeys.SEARCH_EXACT_BOOST,
+                ConfigKeys.SEARCH_TITLE_BOOST, ConfigKeys.INDEX_ANALYZER,
+                ConfigKeys.INDEX_CONTENT_MAX_CHARS, ConfigKeys.MODEL_MAX_TOKENS}) {
             cfg.add(k.key + "=" + AppConfig.getInstance().getString(k.key));
         }
         sb.append(String.join(", ", cfg)).append("\n\n");
         sb.append("| 分组 | 条数 | R@5 | R@10 | MRR |\n|---|---|---|---|---|\n");
         groups.forEach((kind, s) -> sb.append(String.format("| %s | %d | %.3f | %.3f | %.3f |\n",
                 kind, s.total(), s.recallAt5(), s.recallAt10(), s.mrr())));
-        sb.append('\n');
+        sb.append(String.format("%n主口径只认知识块标题。含小节口径（全部）: R@5=%.3f R@10=%.3f MRR=%.3f%n%n",
+                looseAll.recallAt5(), looseAll.recallAt10(), looseAll.mrr()));
         for (String d : detail) {
             sb.append(d).append('\n');
         }
@@ -303,11 +373,13 @@ public final class EvalRunner {
         System.out.println("明细: " + o.detail);
     }
 
-    private static void appendRecord(Options o, Map<String, EvalMetrics.Summary> groups) throws IOException {
+    private static void appendRecord(Options o, Map<String, EvalMetrics.Summary> groups,
+                                     EvalMetrics.Summary looseAll) throws IOException {
         EvalMetrics.Summary all = groups.get(EvalMetrics.ALL);
         String date = LocalDate.now().toString();
-        String row = String.format("| %s | %s | %s | %.3f | %.3f | %.3f | %d 条，topK=%d |",
-                o.label, date, o.change, all.recallAt5(), all.recallAt10(), all.mrr(), all.total(), o.topK);
+        String row = String.format("| %s | %s | %s | %.3f | %.3f | %.3f | %d 条，topK=%d；%s；含小节口径 %.3f/%.3f/%.3f |",
+                o.label, date, o.change, all.recallAt5(), all.recallAt10(), all.mrr(), all.total(), o.topK, o.dataset,
+                looseAll.recallAt5(), looseAll.recallAt10(), looseAll.mrr());
 
         List<String> lines = Files.exists(o.record)
                 ? new ArrayList<>(Files.readAllLines(o.record, StandardCharsets.UTF_8))
@@ -337,9 +409,12 @@ public final class EvalRunner {
         StringBuilder section = new StringBuilder();
         section.append("\n## ").append(o.label).append("（").append(date).append("）\n\n");
         section.append("改动：").append(o.change).append("\n\n");
+        section.append("数据集：").append(o.dataset).append("\n\n");
         section.append("| 分组 | 条数 | R@5 | R@10 | MRR |\n|---|---|---|---|---|\n");
         groups.forEach((kind, s) -> section.append(String.format("| %s | %d | %.3f | %.3f | %.3f |\n",
                 kind, s.total(), s.recallAt5(), s.recallAt10(), s.mrr())));
+        section.append(String.format("%n主口径只认知识块标题，与历史各版本可比；含小节口径（全部）R@5=%.3f R@10=%.3f MRR=%.3f。%n",
+                looseAll.recallAt5(), looseAll.recallAt10(), looseAll.mrr()));
         String detailLink = o.record.getParent().relativize(o.detail).toString().replace('\\', '/');
         section.append("\n明细见 `").append(detailLink).append("`。\n");
         lines.add(section.toString());
@@ -359,8 +434,11 @@ public final class EvalRunner {
         Path detail;
         String label = "v0";
         String change = "基线";
+        String dataset = "";
         int topK = 10;
         boolean rebuild = false;
+        /** 写进工作目录 config.properties 的覆盖项，用于分词器选型与融合权重调参。 */
+        final Map<String, String> overrides = new LinkedHashMap<>();
 
         static Options parse(String[] args, Path repo) {
             Options o = new Options();
@@ -374,12 +452,21 @@ public final class EvalRunner {
                 if (key.equals("rebuild")) {
                     o.rebuild = true;
                 } else if (i + 1 < args.length) {
-                    kv.put(key, args[++i]);
+                    String value = args[++i];
+                    if (key.equals("config")) {
+                        int eq = value.indexOf('=');
+                        if (eq <= 0) {
+                            throw new IllegalArgumentException("--config 需要 key=value: " + value);
+                        }
+                        o.overrides.put(value.substring(0, eq), value.substring(eq + 1));
+                    } else {
+                        kv.put(key, value);
+                    }
                 } else {
                     throw new IllegalArgumentException("参数缺少取值: " + a);
                 }
             }
-            o.notes = Paths.get(kv.getOrDefault("notes", repo.resolve("notes").toString())).toAbsolutePath();
+            o.notes = Paths.get(kv.getOrDefault("notes", resolveNotesDir(repo).toString())).toAbsolutePath();
             o.work = Paths.get(kv.getOrDefault("work", repo.resolve("target/eval/work").toString())).toAbsolutePath();
             o.queries = Paths.get(kv.getOrDefault("queries",
                     repo.resolve("docs/实施计划/eval/queries.yaml").toString())).toAbsolutePath();

@@ -1,5 +1,7 @@
 package com.gt;
 
+import com.gt.kb.model.BlockMeta;
+import com.gt.kb.search.RrfFusion.Channel;
 import com.gt.vector.LuceneVectorSearchService.VectorSearchResult;
 
 import javax.swing.*;
@@ -340,11 +342,30 @@ public class VectorSearchPanel extends JWindow {
         repaint();
     }
     
+    /** 命中通道标记：精=精确短语，关=BM25 关键词，语=向量语义。按枚举顺序输出，便于对照调参。 */
+    private static String channelMarks(VectorSearchResult result) {
+        StringBuilder marks = new StringBuilder();
+        for (Channel channel : Channel.values()) {
+            if (!result.channels.contains(channel)) {
+                continue;
+            }
+            if (marks.length() > 0) {
+                marks.append('+');
+            }
+            marks.append(switch (channel) {
+                case EXACT -> "精";
+                case BM25 -> "关";
+                case VECTOR -> "语";
+            });
+        }
+        return marks.length() == 0 ? "-" : marks.toString();
+    }
+
     /**
      * 结果列表单元格渲染器
-     * 格式：描述 | H1标题          [笔记名] | V:0.66 K:0.15 T:0.81
-     * 左侧：描述 | H1标题
-     * 右侧：[笔记名] | V(向量) K(关键词) T(总分)
+     * 格式：描述 | H1标题          [笔记名] | 精+语 0.0312
+     * 左侧：描述 | H1标题（已废弃的块标出来）
+     * 右侧：[笔记名] | 命中通道 + RRF 融合分
      */
     private class ResultCellRenderer extends DefaultListCellRenderer {
         @Override
@@ -362,22 +383,26 @@ public class VectorSearchPanel extends JWindow {
             if (result.noteDesc != null && !result.noteDesc.isEmpty()) {
                 leftText.append(result.noteDesc);
             }
-            // 处理特殊标记：__NOTE_NAME__ 显示为空（笔记名索引不显示 H1 标题）
-            String displayH1 = result.h1Title;
-            if ("__NOTE_NAME__".equals(displayH1)) {
-                displayH1 = "";  // 笔记名索引不显示标题
-            }
+            // blockId 为空表示命中的是笔记名文档，不显示块标题
+            String displayH1 = result.blockId == null || result.blockId.isEmpty() ? "" : result.h1Title;
             if (displayH1 != null && !displayH1.isEmpty()) {
                 if (leftText.length() > 0) leftText.append(" | ");
                 leftText.append(displayH1);
+                // 超长知识块二次切分后命中的是块内小节，不标出来就看不出具体是哪一段
+                if (!result.sectionTitle.isEmpty() && !result.sectionTitle.equals(displayH1)) {
+                    leftText.append(" > ").append(result.sectionTitle);
+                }
+            }
+            if (BlockMeta.STATUS_DEPRECATED.equals(result.status)) {
+                leftText.append("（已废弃）");
             }
             
             JLabel leftLabel = new JLabel(leftText.toString());
             leftLabel.setFont(leftLabel.getFont().deriveFont(12f));
             
-            // 右侧：[笔记名] | V:向量 K:关键词 T:总分
-            String rightText = String.format("[%s] | V:%.2f K:%.2f T:%.2f", 
-                result.noteKey, result.score, result.keywordScore, result.totalScore);
+            // 右侧：[笔记名] | 命中通道 + 融合分
+            String rightText = String.format("[%s] | %s %.4f",
+                result.noteKey, channelMarks(result), result.score);
             JLabel rightLabel = new JLabel(rightText);
             rightLabel.setFont(rightLabel.getFont().deriveFont(11f));
             

@@ -40,6 +40,8 @@ FastPig/
 # 数据库文件
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 
 # 备份目录
 cleanup_backup_*/

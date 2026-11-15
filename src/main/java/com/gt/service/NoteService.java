@@ -3,6 +3,9 @@ package com.gt.service;
 import com.gt.NoteDto;
 import com.gt.NoteRepository;
 import com.gt.crypto.NoteEncryptionService;
+import com.gt.kb.repo.BlockCatalog;
+import com.gt.kb.repo.BlockRepository;
+import com.gt.kb.repo.SingleFileBlockRepository;
 import com.gt.storage.NoteFileStorage;
 import com.gt.vector.VectorSearchManager;
 import org.apache.logging.log4j.LogManager;
@@ -34,10 +37,12 @@ public class NoteService {
 
     private final NoteRepository repository;
     private final NoteFileStorage fileStorage;
+    private final SingleFileBlockRepository blockRepository;
 
     public NoteService(NoteRepository repository, NoteFileStorage fileStorage) {
         this.repository = repository;
         this.fileStorage = fileStorage;
+        this.blockRepository = new SingleFileBlockRepository(fileStorage, new BlockCatalog(repository.getDbPath()));
     }
 
     public static synchronized NoteService getInstance(NoteRepository repository) {
@@ -45,6 +50,19 @@ public class NoteService {
             instance = new NoteService(repository, NoteFileStorage.getInstance());
         }
         return instance;
+    }
+
+    /** 块仓库，供 AI 档位检索回源取完整块正文。 */
+    public BlockRepository blockRepository() {
+        return blockRepository;
+    }
+
+    /**
+     * 释放块目录持有的数据库连接。退出前必须调用：
+     * Windows 上未释放的连接会一直锁住 fastpig.db，备份/替换库文件都会失败。
+     */
+    public void close() {
+        blockRepository.close();
     }
 
     /**
@@ -90,13 +108,21 @@ public class NoteService {
         }
 
         if (note.encrypted) {
-            // 向量索引里的 h1Title 是明文，私密笔记必须整体移出
+            // 向量索引里的标题和摘要是明文，私密笔记必须整体移出
             VectorSearchManager.getInstance().removeNoteIndex(note.key);
             // 清掉历史迁移可能残留在库里的明文正文
             repository.clearBodyMd(note.id);
         } else {
-            // 更新向量索引（异步），使用描述而非标题
-            VectorSearchManager.getInstance().indexNote(note.key, note.desc, note.bodyMd);
+            // 更新向量索引（异步），块级差量：只重算内容变化的块
+            VectorSearchManager.getInstance().indexNote(note);
+        }
+
+        // 块目录是派生索引，读的是刚落盘的文件：私密笔记切不出块，等同清空它的目录行。
+        // 文件和主索引都已写成功，这里失败只该告警，不能把保存报成失败。
+        try {
+            blockRepository.refreshNote(note.key);
+        } catch (RuntimeException e) {
+            logger.warn("[NoteService] 块目录刷新失败: {} - {}", note.key, e.getMessage());
         }
 
         logger.info("[NoteService] 已保存笔记: " + note.key + " (id=" + note.id + ", version=" + note.version

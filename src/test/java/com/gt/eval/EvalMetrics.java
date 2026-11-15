@@ -11,8 +11,11 @@ import java.util.Map;
  */
 public final class EvalMetrics {
 
-    /** 一条检索结果，按排名顺序传入。 */
-    public record Hit(String noteKey, String h1Title) {
+    /**
+     * 一条检索结果，按排名顺序传入。
+     * h1Title 是所属知识块标题，sectionTitle 是索引段自身的小标题（超长块二次切分才有区别）。
+     */
+    public record Hit(String noteKey, String h1Title, String sectionTitle) {
     }
 
     /** rank 从 1 开始，0 表示 topK 内未命中。 */
@@ -27,11 +30,18 @@ public final class EvalMetrics {
     private EvalMetrics() {
     }
 
-    public static int firstHitRank(List<Hit> ranked, List<EvalQueries.Expect> expects) {
+    /**
+     * rank 从 1 开始，0 表示 topK 内未命中。
+     *
+     * allowSection=false 是主口径：expect 标题只跟知识块标题比，与历史各版本可比。
+     * allowSection=true 额外认块内小节标题，用来暴露「正文其实找对了、只是标题显示成父块」的情况。
+     * 两个口径必须同时报，只报宽口径会把口径变更冒充成检索提升。
+     */
+    public static int firstHitRank(List<Hit> ranked, List<EvalQueries.Expect> expects, boolean allowSection) {
         for (int i = 0; i < ranked.size(); i++) {
             Hit hit = ranked.get(i);
             for (EvalQueries.Expect e : expects) {
-                if (matches(hit, e)) {
+                if (matches(hit, e, allowSection)) {
                     return i + 1;
                 }
             }
@@ -39,11 +49,13 @@ public final class EvalMetrics {
         return 0;
     }
 
-    private static boolean matches(Hit hit, EvalQueries.Expect e) {
+    /** 宽口径下 expect 指名知识块或其下任一小节都算命中：定位到块内小节同样满足「找到这块知识」。 */
+    private static boolean matches(Hit hit, EvalQueries.Expect e, boolean allowSection) {
         if (hit.noteKey() == null || !hit.noteKey().equals(e.note())) {
             return false;
         }
-        return e.noteLevel() || e.title().equals(hit.h1Title());
+        return e.noteLevel() || e.title().equals(hit.h1Title())
+                || (allowSection && e.title().equals(hit.sectionTitle()));
     }
 
     public static Summary summarize(List<Outcome> outcomes) {

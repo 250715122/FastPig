@@ -842,6 +842,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         new Thread(() -> {
             try {
                 VectorSearchManager vsm = VectorSearchManager.getInstance();
+                vsm.setBlockRepository(noteService.blockRepository());
                 vsm.initialize(UnifiedNoteAppFrame.this);
                 
                 // 设置选择回调
@@ -3005,6 +3006,9 @@ public class UnifiedNoteAppFrame extends JFrame {
      * 退出应用程序（同步数据后退出）
      */
     private void exitApplication() {
+        // 块目录长期持有一条 SQLite 连接，先释放，免得挡住下面的 WAL checkpoint 和库文件上传
+        noteService.close();
+
         logger.info("[退出] 正在同步数据库到云端（最多等待5秒）...");
         boolean synced = DbSyncService.getInstance().syncToCloudWithTimeout(5);
         if (synced) {
@@ -3017,7 +3021,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         if (trayIcon != null) {
             SystemTray.getSystemTray().remove(trayIcon);
         }
-        
+
         System.exit(0);
     }
 

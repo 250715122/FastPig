@@ -100,6 +100,21 @@ public class NoteFileStorage {
         return Files.exists(folder) ? folder : null;
     }
 
+    /** 通过 key 定位 note.md；笔记不存在时返回 null。 */
+    public Path findNoteFileByKey(String key) {
+        Path folder = findNoteFolderByKey(key);
+        return folder == null ? null : folder.resolve(NOTE_FILE_NAME);
+    }
+
+    /**
+     * 正文在文件内容中的起始偏移（front matter 之后）；无 front matter 时为 0。
+     * 与 {@link #parseNoteContent} 共用同一套 front matter 识别口径。
+     */
+    public static int bodyOffset(String content) {
+        Matcher matcher = FRONT_MATTER_PATTERN.matcher(content);
+        return matcher.find() ? matcher.end() : 0;
+    }
+
     /**
      * 保存笔记到文件
      */

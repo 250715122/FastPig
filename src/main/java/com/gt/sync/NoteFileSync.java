@@ -580,9 +580,8 @@ public class NoteFileSync {
                             continue;
                         }
                         String noteKey = (note.key != null && !note.key.isEmpty()) ? note.key : task.folderName;
-                        String noteDesc = (note.desc != null) ? note.desc : "";
-                        String content = (note.bodyMd != null) ? note.bodyMd : "";
-                        VectorSearchManager.getInstance().indexNote(noteKey, noteDesc, content);
+                        note.key = noteKey;
+                        VectorSearchManager.getInstance().indexNote(note);
                         triggered++;
                     } catch (Exception e) {
                         logger.warn("[NoteFileSync] 触发向量索引失败: {} - {}", task.folderName, e.getMessage());

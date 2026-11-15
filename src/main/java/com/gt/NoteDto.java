@@ -20,6 +20,7 @@ public class NoteDto {
 
     public static final String DOMAIN_PERSONAL = "个人";
     public static final String TYPE_ESSAY = "随笔";
+    public static final String TYPE_LOG = "日志";
 
     public String id;
     public String key;           // 可选，snippet 场景唯一

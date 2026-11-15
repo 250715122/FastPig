@@ -1,9 +1,14 @@
 package com.gt.vector;
 
 import com.gt.AppConfig;
+import com.gt.NoteDto;
 import com.gt.UnifiedNoteAppFrame;
 import com.gt.VectorSearchPanel;
 import com.gt.config.ConfigKeys;
+import com.gt.kb.chunk.IndexBlocks;
+import com.gt.kb.model.KnowledgeBlock;
+import com.gt.kb.repo.BlockRepository;
+import com.gt.kb.text.IndexTextBuilder;
 import com.gt.storage.NoteFileStorage;
 
 import org.apache.logging.log4j.LogManager;
@@ -11,15 +16,9 @@ import org.apache.logging.log4j.Logger;
 
 import javax.swing.*;
 import java.awt.*;
-import java.io.IOException;
 import java.nio.file.*;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.*;
 import java.util.function.BiConsumer;
 
@@ -41,6 +40,7 @@ public class VectorSearchManager {
     private ScheduledFuture<?> debounceTask;
     
     private LuceneVectorSearchService searchService;
+    private BlockRepository blockRepository; // AI 档位回源取完整块正文用
     private VectorSearchPanel searchPanel;
     private BiConsumer<String, String> onSelectCallback; // (noteKey, h1Title) -> void
     private Window parentWindow; // 保存父窗口引用，用于显示下载提示
@@ -68,6 +68,17 @@ public class VectorSearchManager {
     }
     
     /**
+     * 注入块仓库，AI 档位据此回源取完整块正文。
+     * initialize 可能因模型未下载而提前返回，所以先存下来，等服务建好再应用。
+     */
+    public void setBlockRepository(BlockRepository blockRepository) {
+        this.blockRepository = blockRepository;
+        if (searchService != null) {
+            searchService.setBlockRepository(blockRepository);
+        }
+    }
+
+    /**
      * 初始化向量检索服务
      * @param parent 父窗口（用于显示下载提示）
      */
@@ -88,6 +99,7 @@ public class VectorSearchManager {
         searchService = VectorSearchFactory.getLuceneService();
         
         if (searchService != null && searchService.isAvailable()) {
+            searchService.setBlockRepository(blockRepository);
             // 创建搜索面板
             searchPanel = new VectorSearchPanel(parent);
             searchPanel.setOnSelectCallback(result -> {
@@ -335,21 +347,22 @@ public class VectorSearchManager {
     
     /**
      * 索引单个笔记（块级差量模式）
-     * 
-     * 逐块比对 blockHash：只有内容真正变化的块才重新 embed，
-     * 因此一篇有上百个 H1 的长笔记改动一处，代价也只是一次 embed。
-     * 
+     *
+     * 逐块比对 content_hash：只有内容真正变化的块才重新 embed，
+     * 因此一篇有上百个块的长笔记改动一处，代价也只是一次 embed。
+     *
      * 连按 Ctrl+S 采用延迟合并而非丢弃：末次改动一定会被索引到。
-     * 
-     * @param noteKey 快捷命令
-     * @param noteDesc 描述
-     * @param content 笔记内容
      */
-    public void indexNote(String noteKey, String noteDesc, String content) {
-        if (!isAvailable()) {
+    public void indexNote(NoteDto note) {
+        if (!isAvailable() || note == null || note.key == null || note.key.isEmpty()) {
             return;
         }
-        
+
+        // 任务延迟执行，期间编辑器可能继续改同一个 NoteDto，
+        // 先取快照：要索引的是本次保存的内容，不是执行那一刻的最新状态
+        NoteDto snapshot = snapshotOf(note);
+        String noteKey = snapshot.key;
+
         // 合并式去抖：重排定时任务，只保留最后一次的内容。
         // 原先是冷却期内直接丢弃，会导致 2 秒内的第二次保存永远不进索引。
         ScheduledFuture<?> pending = pendingIndexTasks.get(noteKey);
@@ -359,64 +372,35 @@ public class VectorSearchManager {
         ScheduledFuture<?> task = scheduler.schedule(
             () -> {
                 pendingIndexTasks.remove(noteKey);
-                doIndexNote(noteKey, noteDesc, content);
+                doIndexNote(snapshot);
             },
             AppConfig.getInstance().getLong(ConfigKeys.INDEX_SAVE_DELAY_MS), TimeUnit.MILLISECONDS);
         pendingIndexTasks.put(noteKey, task);
     }
-    
-    private void doIndexNote(String noteKey, String noteDesc, String content) {
+
+    private void doIndexNote(NoteDto note) {
         CompletableFuture.runAsync(() -> {
             try {
-                // 1. 解析新块，建立 docId -> 块 的映射
-                List<NoteH1Parser.H1Block> newBlocks = NoteH1Parser.parse(noteKey, noteDesc, content);
-                Map<String, NoteH1Parser.H1Block> newMap = new LinkedHashMap<>();
-                for (NoteH1Parser.H1Block b : newBlocks) {
-                    newMap.put(searchService.docIdOf(b.noteKey, b.h1Title, b.dupIndex), b);
-                }
-                
-                // 2. 读取已索引的块哈希
-                Map<String, String> oldMap = searchService.getIndexedBlocks(noteKey);
-                
-                // 3. 逐块比对哈希，挑出需要重算的块
-                List<NoteH1Parser.H1Block> changed = new ArrayList<>();
-                for (Map.Entry<String, NoteH1Parser.H1Block> e : newMap.entrySet()) {
-                    String oldHash = oldMap.get(e.getKey());
-                    if (oldHash == null || !oldHash.equals(e.getValue().blockHash)) {
-                        changed.add(e.getValue());
-                    }
-                }
-                
-                // 4. 已消失的块按 docId 删除
-                Set<String> toRemove = new HashSet<>(oldMap.keySet());
-                toRemove.removeAll(newMap.keySet());
-                
-                if (changed.isEmpty() && toRemove.isEmpty()) {
-                    logger.debug("块内容无变化，跳过索引: {}", noteKey);
-                    return;
-                }
-                
-                logger.info("块级差量索引: noteKey={}, 总块数={}, 需重算={}, 删除={}", 
-                    noteKey, newMap.size(), changed.size(), toRemove.size());
-                
-                // 5. 只对变化的块 embed（锁外执行，不阻塞搜索）
-                List<LuceneVectorSearchService.H1BlockWithVector> blocksToWrite = new ArrayList<>();
-                for (NoteH1Parser.H1Block block : changed) {
-                    float[] vector = EmbeddingService.getInstance().embed(block.indexContent);
-                    if (vector != null) {
-                        blocksToWrite.add(new LuceneVectorSearchService.H1BlockWithVector(
-                            block.noteKey, block.noteDesc, block.h1Title, block.indexContent,
-                            block.dupIndex, block.blockHash, vector));
-                    }
-                }
-                
-                // 6. 差量写入 Lucene（单次 commit + refreshReader）
-                searchService.differentialUpdate(noteKey, toRemove, blocksToWrite);
-                
+                searchService.indexNote(note, IndexBlocks.of(note));
             } catch (Exception e) {
                 logger.error("索引笔记失败: {}", e.getMessage(), e);
             }
         });
+    }
+
+    private static NoteDto snapshotOf(NoteDto note) {
+        NoteDto copy = new NoteDto();
+        copy.key = note.key;
+        copy.desc = note.desc;
+        copy.bodyMd = note.bodyMd;
+        copy.domain = note.domain;
+        copy.topic = note.topic;
+        copy.noteType = note.noteType;
+        copy.layer = note.layer;
+        copy.visibility = note.visibility;
+        copy.deleted = note.deleted;
+        copy.encrypted = note.encrypted;
+        return copy;
     }
     
     /**
@@ -436,7 +420,7 @@ public class VectorSearchManager {
      * 全量重建索引
      * 优化：在锁外批量 embed，积累到一定数量后在锁内一次性写入
      * 这样 embed 推理期间不持有写锁，搜索基本不受影响
-     * 
+     *
      * @param notesDir 笔记目录
      * @param progressCallback 进度回调 (current, total)
      */
@@ -444,111 +428,62 @@ public class VectorSearchManager {
         if (!isAvailable() || indexingInProgress) {
             return;
         }
-        
+
         indexingInProgress = true;
-        
-        // 每积累 BATCH_FLUSH_SIZE 个 H1 块就写入一次 Lucene
+
+        // 每积累 BATCH_FLUSH_SIZE 个索引块就写入一次 Lucene
         final int BATCH_FLUSH_SIZE = 50;
-        
+
         CompletableFuture.runAsync(() -> {
             try {
                 // 清空现有索引
                 searchService.clearAll();
-                
-                // 扫描所有笔记
+
                 if (!Files.exists(notesDir)) {
                     return;
                 }
-                
-                List<Path> noteDirs;
-                try (var stream = Files.list(notesDir)) {
-                    // 以 _ 开头的目录是知识库内部数据（如 _kb 内容配置），不是笔记
-                    noteDirs = stream.filter(Files::isDirectory)
-                        .filter(p -> !p.getFileName().toString().startsWith("_"))
-                        .toList();
-                }
-                
-                int total = noteDirs.size();
+
+                // NoteFileStorage 按「基目录 + notes」定位，传进来的正是那个 notes 目录。
+                // 用它扫描而不是自己解析 front matter：私密/已删除标记和分类字段都要走同一套口径。
+                List<NoteDto> notes = new NoteFileStorage(notesDir.toAbsolutePath().getParent().toString())
+                    .scanAllNotes();
+                int total = notes.size();
                 int current = 0;
-                
-                // 批量缓冲区：积累已 embed 的 H1 块
-                List<LuceneVectorSearchService.H1BlockWithVector> batch = new ArrayList<>();
-                
-                for (Path noteDir : noteDirs) {
-                    String noteKey = noteDir.getFileName().toString();
-                    Path noteFile = noteDir.resolve("note.md");
-                    
-                    if (Files.exists(noteFile)) {
-                        try {
-                            String content = Files.readString(noteFile);
-                            
-                            // 私密笔记不进向量索引：Lucene 里的 h1Title 是明文存储的
-                            if (isNoteEncrypted(content)) {
-                                logger.debug("跳过私密笔记的向量索引: {}", noteKey);
-                                current++;
-                                if (progressCallback != null) {
-                                    final int c = current;
-                                    SwingUtilities.invokeLater(() -> progressCallback.accept(c, total));
-                                }
-                                continue;
-                            }
-                            
-                            // 检查是否已删除，跳过已删除的笔记
-                            if (isNoteDeleted(content)) {
-                                current++;
-                                if (progressCallback != null) {
-                                    final int c = current;
-                                    SwingUtilities.invokeLater(() -> progressCallback.accept(c, total));
-                                }
-                                continue;
-                            }
-                            
-                            // 从 YAML Front Matter 中提取描述
-                            String noteDesc = extractDescFromFrontMatter(content);
-                            if (noteDesc == null || noteDesc.isEmpty()) {
-                                noteDesc = noteKey;
-                            }
-                            
-                            // 解析 H1 块
-                            List<NoteH1Parser.H1Block> blocks = NoteH1Parser.parse(noteKey, noteDesc, content);
-                            
-                            // 在锁外逐个 embed，加入批量缓冲区
-                            for (NoteH1Parser.H1Block block : blocks) {
-                                float[] vector = EmbeddingService.getInstance().embed(block.indexContent);
-                                if (vector != null) {
-                                    batch.add(new LuceneVectorSearchService.H1BlockWithVector(
-                                        block.noteKey, block.noteDesc, block.h1Title, block.indexContent,
-                                        block.dupIndex, block.blockHash, vector));
-                                }
-                                
-                                // 达到批次大小，刷入 Lucene
-                                if (batch.size() >= BATCH_FLUSH_SIZE) {
-                                    searchService.batchWriteWithVectors(null, batch);
-                                    batch = new ArrayList<>();
-                                }
-                            }
-                            
-                        } catch (IOException e) {
-                            logger.error("读取笔记失败: {}", noteFile, e);
+
+                // 批量缓冲区：积累已 embed 的索引块
+                List<LuceneVectorSearchService.IndexedBlock> batch = new ArrayList<>();
+
+                for (NoteDto note : notes) {
+                    // IndexBlocks.of 对私密/已删除笔记返回空列表，等同把它们排除在索引外
+                    for (KnowledgeBlock block : IndexBlocks.of(note)) {
+                        float[] vector = EmbeddingService.getInstance().embed(IndexTextBuilder.build(block));
+                        if (vector != null) {
+                            batch.add(new LuceneVectorSearchService.IndexedBlock(note, block, vector));
+                        }
+
+                        // 达到批次大小，刷入 Lucene
+                        if (batch.size() >= BATCH_FLUSH_SIZE) {
+                            searchService.batchWriteWithVectors(null, batch);
+                            batch = new ArrayList<>();
                         }
                     }
-                    
+
                     current++;
                     if (progressCallback != null) {
                         final int c = current;
                         SwingUtilities.invokeLater(() -> progressCallback.accept(c, total));
                     }
                 }
-                
+
                 // 刷入剩余的缓冲数据
                 if (!batch.isEmpty()) {
                     searchService.batchWriteWithVectors(null, batch);
                 }
-                
+
                 // 重建成功后才落盘结构版本，中途失败下次仍会重建
                 searchService.markSchemaCurrent();
                 logger.info("全量索引完成，共 {} 条", searchService.getIndexedCount());
-                
+
             } catch (Exception e) {
                 logger.error("全量索引失败: {}", e.getMessage(), e);
             } finally {
@@ -556,7 +491,7 @@ public class VectorSearchManager {
             }
         });
     }
-    
+
     /**
      * 关闭服务
      */
@@ -566,77 +501,6 @@ public class VectorSearchManager {
             searchService.close();
         }
     }
-    
-    /**
-     * 从 YAML Front Matter 中提取描述
-     * @param content 笔记内容
-     * @return 描述，未找到返回 null
-     */
-    private String extractDescFromFrontMatter(String content) {
-        if (content == null || !content.startsWith("---")) {
-            return null;
-        }
-        
-        int endIndex = content.indexOf("---", 3);
-        if (endIndex == -1) {
-            return null;
-        }
-        
-        String frontMatter = content.substring(3, endIndex);
-        
-        // 简单解析 desc 字段
-        for (String line : frontMatter.split("\n")) {
-            line = line.trim();
-            if (line.startsWith("desc:")) {
-                String desc = line.substring(5).trim();
-                // 去掉可能的引号
-                if (desc.startsWith("\"") && desc.endsWith("\"")) {
-                    desc = desc.substring(1, desc.length() - 1);
-                } else if (desc.startsWith("'") && desc.endsWith("'")) {
-                    desc = desc.substring(1, desc.length() - 1);
-                }
-                return desc;
-            }
-        }
-        
-        return null;
-    }
-    
-    /**
-     * 检查笔记是否为私密笔记（front matter 中 encrypted: true）
-     */
-    private boolean isNoteEncrypted(String content) {
-        return readFrontMatterFlag(content, "encrypted:");
-    }
-    
-    /**
-     * 检查笔记是否被标记为已删除
-     * @param content 笔记内容
-     * @return 是否已删除
-     */
-    private boolean isNoteDeleted(String content) {
-        return readFrontMatterFlag(content, "deleted:");
-    }
-    
-    private boolean readFrontMatterFlag(String content, String prefix) {
-        if (content == null || !content.startsWith("---")) {
-            return false;
-        }
-        
-        int endIndex = content.indexOf("---", 3);
-        if (endIndex == -1) {
-            return false;
-        }
-        
-        for (String line : content.substring(3, endIndex).split("\n")) {
-            line = line.trim();
-            if (line.startsWith(prefix)) {
-                return "true".equalsIgnoreCase(line.substring(prefix.length()).trim());
-            }
-        }
-        
-        return false;
-    }
-    
+
 }
 

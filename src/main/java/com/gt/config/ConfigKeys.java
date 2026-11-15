@@ -38,11 +38,24 @@ public enum ConfigKeys {
     // ===== 检索 =====
     SEARCH_HUMAN_TOPK("search.human.topk", 20, 1, 200, Category.SEARCH, false, "联想结果条数"),
     SEARCH_HUMAN_PER_NOTE("search.human.per.note", 3, 1, 50, Category.SEARCH, false, "每篇笔记结果配额"),
-    SEARCH_OVERFETCH("search.overfetch", 4, 1, 20, Category.SEARCH, false, "候选超取倍数"),
+    SEARCH_HUMAN_CANDIDATES("search.human.candidates", 40, 5, 500, Category.SEARCH, false, "人档位每通道候选数"),
+    SEARCH_AI_TOPK("search.ai.topk", 10, 1, 200, Category.SEARCH, false, "AI 返回条数"),
+    SEARCH_AI_PER_NOTE("search.ai.per.note", 0, 0, 50, Category.SEARCH, false, "AI 每篇配额（0=不限）"),
+    SEARCH_AI_CANDIDATES("search.ai.candidates", 100, 5, 1000, Category.SEARCH, false, "AI 每通道候选数"),
+    SEARCH_RRF_K("search.rrf.k", 60, 1, 1000, Category.SEARCH, false, "RRF 平滑常数 k"),
+    // 精确通道 minShouldMatch=1，查询里任一 ASCII 串命中即入榜；口语化查询中的
+    // commit/starrocks 这类普通词会拉进大量弱相关文档，权重必须低于 BM25 与向量。
+    SEARCH_RRF_WEIGHT_EXACT("search.rrf.weight.exact", 0.75, 0.0, 10.0, Category.SEARCH, false, "精确通道权重"),
+    SEARCH_RRF_WEIGHT_BM25("search.rrf.weight.bm25", 1.0, 0.0, 10.0, Category.SEARCH, false, "BM25 通道权重"),
+    SEARCH_RRF_WEIGHT_VECTOR("search.rrf.weight.vector", 1.0, 0.0, 10.0, Category.SEARCH, false, "向量通道权重"),
+    SEARCH_EXACT_BOOST("search.exact.boost", 2.0, 1.0, 10.0, Category.SEARCH, false, "命令/报错串精确加权"),
+    SEARCH_TITLE_BOOST("search.title.boost", 2.0, 0.0, 10.0, Category.SEARCH, false, "BM25 标题字段加权"),
+    SEARCH_DEPRECATED_PENALTY("search.deprecated.penalty", 0.5, 0.0, 1.0, Category.SEARCH, false, "已废弃块降权系数"),
     SEARCH_MIN_QUERY_CHARS("search.min.query.chars", 2, 1, 10, Category.SEARCH, false, "触发检索最少字数"),
     SEARCH_DEBOUNCE_MS("search.debounce.ms", 300, 0, 5000, Category.SEARCH, false, "输入防抖（毫秒）"),
 
     // ===== 索引 =====
+    INDEX_ANALYZER("index.analyzer", "standard", null, null, Category.INDEX, true, "分词器（standard/smartcn）"),
     INDEX_CONTENT_MAX_CHARS("index.content.max.chars", 300, 50, 4000, Category.INDEX, true, "块索引正文最大字数"),
     INDEX_SNIPPET_MAX_CHARS("index.snippet.max.chars", 200, 50, 2000, Category.INDEX, true, "结果摘要最大字数"),
     INDEX_SAVE_DELAY_MS("index.save.delay.ms", 2000L, 0L, 60000L, Category.INDEX, false, "保存后建索引延迟（毫秒）"),
@@ -62,6 +75,12 @@ public enum ConfigKeys {
 
     // ===== 知识库 =====
     KB_GUESS_MIN_SCORE("kb.guess.min.score", 0.55, 0.0, 1.0, Category.KB, false, "分类猜测最低相似度"),
+    KB_ID_AUTO_ASSIGN("kb.id.auto.assign", true, null, null, Category.KB, false, "保存时自动补块 ID"),
+    KB_CHUNK_MAX_CHARS("kb.chunk.max.chars", 1500, 200, 20000, Category.KB, true, "知识块最大字数（超出再切）"),
+    KB_CHUNK_TARGET_CHARS("kb.chunk.target.chars", 800, 100, 8000, Category.KB, true, "索引块目标字数"),
+    KB_CHUNK_OVERLAP_CHARS("kb.chunk.overlap.chars", 100, 0, 1000, Category.KB, true, "索引块段间重叠字数"),
+    KB_CHUNK_MIN_CHARS("kb.chunk.min.chars", 30, 0, 500, Category.KB, true, "无标题短块合并阈值"),
+    KB_BLOCK_CACHE_MAX_NOTES("kb.block.cache.max.notes", 64, 1, 1000, Category.KB, false, "块缓存笔记数上限"),
     ;
 
     /** 设置页分类。ABOUT 无配置项，仅用于导航。 */

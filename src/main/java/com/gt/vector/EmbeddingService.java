@@ -21,7 +21,7 @@ import java.util.function.Consumer;
  * 支持 bge-small-zh-v1.5 模型（512 维向量）
  * 模型文件需放在 models/ 目录下
  */
-public class EmbeddingService {
+public class EmbeddingService implements Embedder {
     
     private static final Logger logger = LogManager.getLogger(EmbeddingService.class);
     

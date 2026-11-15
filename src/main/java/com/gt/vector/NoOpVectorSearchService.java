@@ -1,6 +1,8 @@
 package com.gt.vector;
 
-import java.util.ArrayList;
+import com.gt.NoteDto;
+import com.gt.kb.model.KnowledgeBlock;
+
 import java.util.List;
 
 /**
@@ -23,24 +25,13 @@ public class NoOpVectorSearchService implements VectorSearchService {
     }
 
     @Override
-    public void indexNote(String noteId, String content) {
+    public void indexNote(NoteDto note, List<KnowledgeBlock> blocks) {
         // 空实现
     }
 
     @Override
-    public void indexNotes(List<String> noteIds, List<String> contents) {
+    public void removeIndex(String noteKey) {
         // 空实现
-    }
-
-    @Override
-    public void removeIndex(String noteId) {
-        // 空实现
-    }
-
-    @Override
-    public List<SearchResult> searchSimilar(String query, int topK) {
-        // 返回空列表
-        return new ArrayList<>();
     }
 
     @Override
@@ -63,4 +54,3 @@ public class NoOpVectorSearchService implements VectorSearchService {
         return 0;
     }
 }
-
