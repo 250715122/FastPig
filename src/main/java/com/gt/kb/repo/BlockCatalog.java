@@ -1,6 +1,7 @@
 package com.gt.kb.repo;
 
 import com.gt.kb.model.BlockRef;
+import com.gt.kb.model.BlockSummary;
 import com.gt.kb.model.KnowledgeBlock;
 import com.gt.kb.text.PinyinInitials;
 import org.apache.logging.log4j.LogManager;
@@ -8,7 +9,9 @@ import org.apache.logging.log4j.Logger;
 
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -196,6 +199,44 @@ public class BlockCatalog implements AutoCloseable {
         } catch (SQLException e) {
             throw new RuntimeException("查询块目录失败: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 一篇笔记的全部块，按原文行号排序。树形目录懒加载块节点用。
+     *
+     * 与 {@code BlockRepository.listBlocks} 的区别：这里只读派生表，不碰文件也不重新切分，
+     * 因此展开节点是毫秒级的；代价是它反映的是上次保存时的切分结果。
+     */
+    public synchronized List<BlockSummary> listNote(String noteKey) {
+        String sql = "SELECT block_id, note_key, title, level, start_line, end_line FROM kb_blocks"
+                + " WHERE note_key = ? ORDER BY start_line, block_id";
+        List<BlockSummary> out = new ArrayList<>();
+        try (PreparedStatement ps = connection().prepareStatement(sql)) {
+            ps.setString(1, noteKey);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(new BlockSummary(rs.getString(1), rs.getString(2), rs.getString(3),
+                            rs.getInt(4), rs.getInt(5), rs.getInt(6)));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("列出笔记块失败: " + noteKey + ", " + e.getMessage(), e);
+        }
+        return out;
+    }
+
+    /** 每篇笔记的块数。一次 GROUP BY 取全量，避免目录刷新时逐篇查询。 */
+    public synchronized Map<String, Integer> countByNote() {
+        Map<String, Integer> out = new LinkedHashMap<>();
+        try (Statement st = connection().createStatement();
+             ResultSet rs = st.executeQuery("SELECT note_key, COUNT(*) FROM kb_blocks GROUP BY note_key")) {
+            while (rs.next()) {
+                out.put(rs.getString(1), rs.getInt(2));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("统计块目录失败: " + e.getMessage(), e);
+        }
+        return out;
     }
 
     /** LIKE 前缀转义：用户输入里的 % _ \ 必须当字面量，否则前缀直达会变成任意匹配。 */

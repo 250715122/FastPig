@@ -961,6 +961,11 @@ public class UnifiedNoteAppFrame extends JFrame {
     private JPanel tocPanel; // 目录面板容器
     private JList<TocItem> tocList; // 目录列表组件
     private DefaultListModel<TocItem> tocModel; // 目录数据模型
+    private JScrollPane tocScrollPane; // 本文目录的滚动容器，主题切换时要单独刷
+    private JTabbedPane sidebarTabs; // 侧栏分页：本文目录 | 知识库树
+    private KbTreePanel kbTreePanel;
+    /** 侧栏宽度。原先各处硬编码 200，树形目录要显示「分类/主题/笔记/块」四级，200 太窄。 */
+    private static final int SIDEBAR_WIDTH = 260;
     private JPanel statusBar;
     private JLabel statusLeft;
     private JLabel statusRight;
@@ -1029,7 +1034,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                         tocPanel, htmlScrollPane);
                 previewWithTocSplit.setResizeWeight(0);
                 centerComponent = previewWithTocSplit;
-                SwingUtilities.invokeLater(() -> previewWithTocSplit.setDividerLocation(200));
+                SwingUtilities.invokeLater(() -> previewWithTocSplit.setDividerLocation(SIDEBAR_WIDTH));
             } else {
                 // 只显示预览面板（全屏）
                 centerComponent = htmlScrollPane;
@@ -1090,7 +1095,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 previewSplit.setDividerLocation(0.5);
                 if (tocVisible) {
-                    previewWithTocSplit.setDividerLocation(200);
+                    previewWithTocSplit.setDividerLocation(SIDEBAR_WIDTH);
                 }
             });
             
@@ -1126,7 +1131,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                                 tocPanel, htmlScrollPane);
                         previewWithTocSplit.setResizeWeight(0);
                         centerComponent = previewWithTocSplit;
-                        SwingUtilities.invokeLater(() -> previewWithTocSplit.setDividerLocation(200));
+                        SwingUtilities.invokeLater(() -> previewWithTocSplit.setDividerLocation(SIDEBAR_WIDTH));
                     } else {
                         // 隐藏目录：只显示预览区
                         centerComponent = htmlScrollPane;
@@ -1138,7 +1143,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                     if (tocVisible && tocPanel != null) {
                         // 显示目录
                         previewWithTocSplit.setLeftComponent(tocPanel);
-                        SwingUtilities.invokeLater(() -> previewWithTocSplit.setDividerLocation(200));
+                        SwingUtilities.invokeLater(() -> previewWithTocSplit.setDividerLocation(SIDEBAR_WIDTH));
                     } else {
                         // 隐藏目录
                         previewWithTocSplit.setLeftComponent(null);
@@ -1188,7 +1193,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                     
                     SwingUtilities.invokeLater(() -> {
                         int width = getWidth();
-                        editWithTocSplit.setDividerLocation(width - 200 - 10);
+                        editWithTocSplit.setDividerLocation(width - SIDEBAR_WIDTH - 10);
                     });
                 } else {
                     // 隐藏目录：只显示编辑区
@@ -1337,23 +1342,71 @@ public class UnifiedNoteAppFrame extends JFrame {
             BorderFactory.createEmptyBorder(5, 5, 5, 5)
         ));
         applyScrollPaneTheme(scrollPane);
-        
-        // 添加目录标题标签
-        JLabel titleLabel = new JLabel("目录");
-        titleLabel.setFont(new Font("Microsoft YaHei UI", Font.BOLD, 13));
-        titleLabel.setForeground(UIColors.TEXT_PRIMARY);
-        titleLabel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
-        titleLabel.setBackground(UIColors.BG_SECONDARY);
-        titleLabel.setOpaque(true);
-        
+        tocScrollPane = scrollPane;
+
+        kbTreePanel = new KbTreePanel(new KbTreeHost());
+
+        // 分页取代原来的「目录」标题标签：本文目录与知识库目录共用一个侧栏
+        sidebarTabs = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.SCROLL_TAB_LAYOUT);
+        sidebarTabs.setFont(new Font("Microsoft YaHei UI", Font.PLAIN, 12));
+        sidebarTabs.setBackground(UIColors.BG_SECONDARY);
+        sidebarTabs.setForeground(UIColors.TEXT_PRIMARY);
+        sidebarTabs.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, UIColors.BORDER_BASE));
+        sidebarTabs.addTab("本文", scrollPane);
+        sidebarTabs.addTab("知识库", kbTreePanel);
+        sidebarTabs.addChangeListener(e -> {
+            if (sidebarTabs.getSelectedComponent() == kbTreePanel) {
+                kbTreePanel.ensureBuilt();
+            }
+        });
+
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(UIColors.BG_PRIMARY);
-        panel.add(titleLabel, BorderLayout.NORTH);
-        panel.add(scrollPane, BorderLayout.CENTER);
-        panel.setPreferredSize(new Dimension(200, 0));
-        panel.setMinimumSize(new Dimension(200, 0));
-        
+        panel.add(sidebarTabs, BorderLayout.CENTER);
+        panel.setPreferredSize(new Dimension(SIDEBAR_WIDTH, 0));
+        panel.setMinimumSize(new Dimension(SIDEBAR_WIDTH, 0));
+
         return panel;
+    }
+
+    /** 树形目录的数据与导航都走宿主，本类只负责把仓库和编辑器接上去。 */
+    private final class KbTreeHost implements KbTreePanel.Host {
+        @Override
+        public List<NoteDto> noteMetadata() {
+            return repository.findAllMetadata();
+        }
+
+        @Override
+        public com.gt.kb.Taxonomy taxonomy() {
+            return com.gt.kb.Taxonomy.loadReadOnly(noteService.getFileStorage().getNotesDir());
+        }
+
+        @Override
+        public java.util.Map<String, Integer> blockCounts() {
+            return noteService.blockRepository().blockCounts();
+        }
+
+        @Override
+        public List<com.gt.kb.model.BlockSummary> blockSummaries(String noteKey) {
+            return noteService.blockRepository().listBlockSummaries(noteKey);
+        }
+
+        @Override
+        public void openNote(String noteKey) {
+            openNoteAndJumpToH1(noteKey, null);
+        }
+
+        @Override
+        public void openBlock(String noteKey, String blockId, int startLine) {
+            openNoteAndJumpToBlock(noteKey, blockId, startLine);
+        }
+    }
+
+    /** 保存/删除/恢复后让树自更新；侧栏没打开过时是空操作。 */
+    private void refreshKbTree() {
+        if (kbTreePanel != null) {
+            kbTreePanel.scheduleRefresh();
+        }
     }
     
     /**
@@ -1380,36 +1433,10 @@ public class UnifiedNoteAppFrame extends JFrame {
      */
     private void jumpToHeading(TocItem item) {
         if (item == null) return;
-        
+
         try {
-            // 跳转编辑区：定位到指定行号
-            String text = bodyArea.getText();
-            String[] lines = text.split("\n", -1);
-            
-            if (item.lineNumber > 0 && item.lineNumber <= lines.length) {
-                // 计算目标行的偏移位置
-                int offset = 0;
-                for (int i = 0; i < item.lineNumber - 1 && i < lines.length; i++) {
-                    offset += lines[i].length() + 1; // +1 for newline
-                }
-                
-                // 设置光标位置并滚动到可见区域
-                bodyArea.setCaretPosition(offset);
-                bodyArea.requestFocusInWindow();
-                
-                // 尝试将目标行滚动到视口中央
-                try {
-                    Rectangle rect = bodyArea.modelToView(offset);
-                    if (rect != null) {
-                        Rectangle visibleRect = bodyArea.getVisibleRect();
-                        rect.y = Math.max(0, rect.y - visibleRect.height / 2);
-                        bodyArea.scrollRectToVisible(rect);
-                    }
-                } catch (Exception e) {
-                    // 忽略滚动错误
-                }
-            }
-            
+            scrollEditorToLine(item.lineNumber);
+
             // 跳转预览区：使用锚点ID
             if (htmlPane != null && item.anchorId != null && !item.anchorId.isEmpty()) {
                 SwingUtilities.invokeLater(() -> {
@@ -1418,6 +1445,53 @@ public class UnifiedNoteAppFrame extends JFrame {
             }
         } catch (Exception e) {
             logger.error("[TOC] 跳转失败: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 把编辑区第 lineNumber 行（1 起，逻辑行）滚动到视口中央并置光标。
+     *
+     * 编辑区开了自动换行，getLineStartOffset 数的是显示行，与目录/块目录的逻辑行号对不上，
+     * 所以这里按换行符累加偏移。
+     */
+    private void scrollEditorToLine(int lineNumber) {
+        String[] lines = bodyArea.getText().split("\n", -1);
+        if (lineNumber <= 0 || lineNumber > lines.length) {
+            return;
+        }
+        int offset = 0;
+        for (int i = 0; i < lineNumber - 1; i++) {
+            offset += lines[i].length() + 1; // +1 for newline
+        }
+        bodyArea.setCaretPosition(offset);
+        bodyArea.requestFocusInWindow();
+        try {
+            Rectangle rect = bodyArea.modelToView(offset);
+            if (rect != null) {
+                Rectangle visibleRect = bodyArea.getVisibleRect();
+                rect.y = Math.max(0, rect.y - visibleRect.height / 2);
+                bodyArea.scrollRectToVisible(rect);
+            }
+        } catch (Exception e) {
+            // 忽略滚动错误
+        }
+    }
+
+    /**
+     * 打开笔记并跳到指定知识块（任务 1.8 精确跳转）。
+     *
+     * startLine 是块目录里相对正文的行号，而编辑区首行是 key/desc 命令行，故 +1。
+     * 索引子块（{@code ku_xxx#pN}）的行号只能由调用方给出；传 ≤0 时回落到父块定位。
+     */
+    private void openNoteAndJumpToBlock(String noteKey, String blockId, int startLine) {
+        openNoteAndJumpToH1(noteKey, null);
+        int line = startLine;
+        if (line <= 0 && blockId != null && !blockId.isEmpty()) {
+            line = noteService.blockRepository().locate(blockId)
+                    .map(com.gt.kb.repo.BlockLocation::startLine).orElse(0);
+        }
+        if (line > 0) {
+            scrollEditorToLine(line + 1);
         }
     }
     
@@ -1441,8 +1515,10 @@ public class UnifiedNoteAppFrame extends JFrame {
             htmlScrollPane = new JScrollPane(htmlPane);
             applyScrollPaneTheme(htmlScrollPane);
             
-            // 创建目录面板
-            tocPanel = createTocPanel();
+            // 创建目录面板（编辑模式下可能已建过，复用以免多出一套树和刷新定时器）
+            if (tocPanel == null) {
+                tocPanel = createTocPanel();
+            }
             
             // 创建目录区和预览区的分割面板（内层）
             // 布局：目录区 | 预览区
@@ -1467,7 +1543,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 previewSplit.setDividerLocation(0.5);
                 if (tocVisible) {
-                    previewWithTocSplit.setDividerLocation(200);
+                    previewWithTocSplit.setDividerLocation(SIDEBAR_WIDTH);
                 }
             });
             
@@ -2580,6 +2656,7 @@ public class UnifiedNoteAppFrame extends JFrame {
                         : "已保存到 " + current.domain + " / " + current.topic);
             }
             updateEditorStatus();
+            refreshKbTree();
         }catch(Exception ex){
             statusLeft.setText("保存失败（重试）");
         }
@@ -2658,6 +2735,7 @@ public class UnifiedNoteAppFrame extends JFrame {
         if (opt == JOptionPane.YES_OPTION) {
             // 使用 NoteService 删除（同时更新文件和索引）
             noteService.delete(current.id);
+            refreshKbTree();
             // 保存最近一次删除，用于撤销
             lastDeletedKey = current.key;
             lastDeletedExpireAt = System.currentTimeMillis() + 60000; // 60秒内可撤销
@@ -2742,6 +2820,7 @@ public class UnifiedNoteAppFrame extends JFrame {
             lastDeletedExpireAt = 0L;
             stopUndoCountdown();
             statusLeft.setText("已恢复");
+            refreshKbTree();
             if (n != null) loadNote(n);
         }catch(Exception ex){
             JOptionPane.showMessageDialog(this, "恢复失败: "+ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
@@ -4635,27 +4714,26 @@ public class UnifiedNoteAppFrame extends JFrame {
         // 应用目录面板主题（如果存在）
         if (tocPanel != null) {
             tocPanel.setBackground(UIColors.BG_PRIMARY);
-            
+
             // 更新目录列表
             if (tocList != null) {
                 tocList.setBackground(UIColors.BG_PRIMARY);
                 tocList.setForeground(UIColors.TEXT_PRIMARY);
             }
-            
-            // 找到并更新标题标签
-            for (Component comp : tocPanel.getComponents()) {
-                if (comp instanceof JLabel) {
-                    JLabel label = (JLabel) comp;
-                    label.setForeground(UIColors.TEXT_PRIMARY);
-                    label.setBackground(UIColors.BG_SECONDARY);
-                } else if (comp instanceof JScrollPane) {
-                    JScrollPane sp = (JScrollPane) comp;
-                    sp.setBorder(BorderFactory.createCompoundBorder(
-                        BorderFactory.createMatteBorder(0, 0, 0, 1, UIColors.BORDER_BASE),
-                        BorderFactory.createEmptyBorder(5, 5, 5, 5)
-                    ));
-                    applyScrollPaneTheme(sp);
-                }
+            if (tocScrollPane != null) {
+                tocScrollPane.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(0, 0, 0, 1, UIColors.BORDER_BASE),
+                    BorderFactory.createEmptyBorder(5, 5, 5, 5)
+                ));
+                applyScrollPaneTheme(tocScrollPane);
+            }
+            if (sidebarTabs != null) {
+                sidebarTabs.setBackground(UIColors.BG_SECONDARY);
+                sidebarTabs.setForeground(UIColors.TEXT_PRIMARY);
+                sidebarTabs.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, UIColors.BORDER_BASE));
+            }
+            if (kbTreePanel != null) {
+                kbTreePanel.applyTheme();
             }
         }
         

@@ -386,6 +386,29 @@ public class NoteRepository {
         }
     }
 
+    /**
+     * 所有未删除笔记的元数据，不含正文与标签。
+     *
+     * 树形目录每次保存都要重建，用 findAll 会把 133 篇正文全读进内存（其中一篇 14 万字），
+     * 而目录只需要 key/标题/分类/加密标记。列由 initialize() 的迁移保证存在。
+     */
+    public List<NoteDto> findAllMetadata() {
+        String sql = "SELECT id, key, title, desc, created_at, updated_at, version, deleted,"
+                + " folder_path, content_hash, encrypted, domain, topic, note_type, layer, visibility, aliases_json"
+                + " FROM snippets WHERE deleted=0 AND key IS NOT NULL ORDER BY key ASC";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ResultSet rs = ps.executeQuery();
+            List<NoteDto> list = new ArrayList<>();
+            while (rs.next()) {
+                list.add(mapperMeta(rs));
+            }
+            return list;
+        } catch (SQLException e) {
+            throw new RuntimeException("查询笔记元数据失败: " + e.getMessage(), e);
+        }
+    }
+
     public List<NoteDto> findUpdatedSince(long timestamp) {
         String sql = "SELECT * FROM snippets WHERE updated_at > ? ORDER BY updated_at DESC";
         try (Connection conn = getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -415,53 +438,41 @@ public class NoteRepository {
     }
 
     private NoteDto mapper(ResultSet rs) throws SQLException {
+        NoteDto n = mapperMeta(rs);
+        n.tags = fromJson(rs.getString("tags_json"));
+        n.bodyMd = rs.getString("body_md");
+        n.frontMatter = rs.getString("front_matter");
+        // 私密笔记的正文只以密文存在于文件里，库里读到的任何 body_md 都是历史残留，不可信
+        if (n.encrypted) {
+            n.bodyMd = null;
+        }
+        return n;
+    }
+
+    /** 不含正文与标签的元数据映射，要求结果集里有除 tags_json/body_md/front_matter 之外的全部列。 */
+    private NoteDto mapperMeta(ResultSet rs) throws SQLException {
         NoteDto n = new NoteDto();
         n.id = rs.getString("id");
         n.key = rs.getString("key");
         n.title = rs.getString("title");
         n.desc = rs.getString("desc");
-        n.tags = fromJson(rs.getString("tags_json"));
-        n.bodyMd = rs.getString("body_md");
-        n.frontMatter = rs.getString("front_matter");
         n.createdAt = rs.getLong("created_at");
         n.updatedAt = rs.getLong("updated_at");
         n.version = rs.getInt("version");
         n.deleted = rs.getInt("deleted") == 1;
-        
-        // 新字段（可能不存在于旧数据库）
-        try {
-            n.folderPath = rs.getString("folder_path");
-        } catch (SQLException e) {
-            n.folderPath = null;
-        }
-        try {
-            n.contentHash = rs.getString("content_hash");
-        } catch (SQLException e) {
-            n.contentHash = null;
-        }
-        try {
-            n.encrypted = rs.getInt("encrypted") == 1;
-        } catch (SQLException e) {
-            n.encrypted = false;
-        }
-        // 知识库元数据。旧库没有这些列，缺列时保留 NoteDto 的默认值。
-        try {
-            n.domain = NoteDto.orDefault(rs.getString("domain"), NoteDto.DEFAULT_DOMAIN);
-            n.topic = NoteDto.orDefault(rs.getString("topic"), NoteDto.DEFAULT_TOPIC);
-            n.noteType = NoteDto.normalizeNoteType(rs.getString("note_type"));
-            n.layer = NoteDto.normalizeLayer(rs.getString("layer"));
-            n.visibility = NoteDto.normalizeVisibility(rs.getString("visibility"));
-            n.aliases = fromJson(rs.getString("aliases_json"));
-        } catch (SQLException e) {
-            // 列不存在，沿用默认值
-        }
-        // 私密笔记的正文只以密文存在于文件里，库里读到的任何 body_md 都是历史残留，不可信
+        n.folderPath = rs.getString("folder_path");
+        n.contentHash = rs.getString("content_hash");
+        n.encrypted = rs.getInt("encrypted") == 1;
+        n.domain = NoteDto.orDefault(rs.getString("domain"), NoteDto.DEFAULT_DOMAIN);
+        n.topic = NoteDto.orDefault(rs.getString("topic"), NoteDto.DEFAULT_TOPIC);
+        n.noteType = NoteDto.normalizeNoteType(rs.getString("note_type"));
+        n.layer = NoteDto.normalizeLayer(rs.getString("layer"));
+        n.visibility = NoteDto.normalizeVisibility(rs.getString("visibility"));
+        n.aliases = fromJson(rs.getString("aliases_json"));
         if (n.encrypted) {
-            n.bodyMd = null;
             n.locked = true;
             n.visibility = NoteDto.VISIBILITY_PRIVATE;
         }
-        
         return n;
     }
 

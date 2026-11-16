@@ -10,6 +10,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class NoteRepositoryTest {
@@ -189,5 +190,60 @@ public class NoteRepositoryTest {
         repo.saveIndex(n);
 
         assertEquals(NoteDto.VISIBILITY_HUMAN, findByKey(repo, "essaykey").visibility);
+    }
+
+    /** 树形目录的数据源：分类字段要齐全，但正文和标签不该被加载。 */
+    @Test
+    public void findAllMetadataCarriesClassificationWithoutBody() {
+        NoteRepository repo = new NoteRepository(tempDir.resolve("tree-meta.db").toString());
+        NoteDto n = newNote("mysql");
+        n.domain = "数据库";
+        n.topic = "MySQL";
+        n.noteType = "速查";
+        n.layer = NoteDto.LAYER_RAW;
+        n.aliases = List.of("mysql-notes");
+        repo.save(n);
+
+        List<NoteDto> meta = repo.findAllMetadata();
+        assertEquals(1, meta.size());
+        NoteDto loaded = meta.get(0);
+        assertEquals("mysql", loaded.key);
+        assertEquals("单元测试标题", loaded.title);
+        assertEquals("数据库", loaded.domain);
+        assertEquals("MySQL", loaded.topic);
+        assertEquals("速查", loaded.noteType);
+        assertEquals(NoteDto.LAYER_RAW, loaded.layer);
+        assertEquals(List.of("mysql-notes"), loaded.aliases);
+        assertNull(loaded.bodyMd, "目录查询不该加载正文");
+        assertNull(loaded.frontMatter);
+        assertNull(loaded.tags);
+    }
+
+    /** 过滤 all 是目录层的职责，查询层要如实返回，否则又会出现「数据库里有哪些笔记」口径不一致。 */
+    @Test
+    public void findAllMetadataKeepsAllAndSkipsDeleted() {
+        NoteRepository repo = new NoteRepository(tempDir.resolve("tree-scope.db").toString());
+        repo.save(newNote("all"));
+        repo.save(newNote("mysql"));
+        NoteDto gone = newNote("gone");
+        gone.deleted = true;
+        repo.save(gone);
+
+        assertEquals(List.of("all", "mysql"), repo.findAllMetadata().stream().map(n -> n.key).toList());
+    }
+
+    @Test
+    public void findAllMetadataMarksEncryptedAsPrivateAndLocked() {
+        NoteRepository repo = new NoteRepository(tempDir.resolve("tree-enc.db").toString());
+        NoteDto n = newNote("secret");
+        n.encrypted = true;
+        n.visibility = NoteDto.VISIBILITY_AI;
+        repo.saveIndex(n);
+
+        NoteDto loaded = repo.findAllMetadata().get(0);
+        assertTrue(loaded.encrypted);
+        assertTrue(loaded.locked);
+        assertEquals(NoteDto.VISIBILITY_PRIVATE, loaded.visibility);
+        assertNull(loaded.bodyMd);
     }
 }

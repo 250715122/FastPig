@@ -1,8 +1,10 @@
 package com.gt.kb.repo;
 
+import com.gt.kb.model.BlockSummary;
 import com.gt.kb.model.KnowledgeBlock;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -15,6 +17,17 @@ public interface BlockRepository {
 
     /** 该笔记的全部知识块（不含二次切分的索引块），按原文顺序。 */
     List<KnowledgeBlock> listBlocks(String noteKey);
+
+    /**
+     * 该笔记的块元数据，按行号排序，不含正文。
+     *
+     * 与 {@link #listBlocks} 的区别：读派生目录而不是重新切分文件，因此展开树节点是毫秒级的。
+     * 代价是它反映上次保存时的切分结果，保存后由 {@code NoteService.save} 刷新。
+     */
+    List<BlockSummary> listBlockSummaries(String noteKey);
+
+    /** 每篇笔记的块数，一次取全量，供目录刷新时标注块数量。 */
+    Map<String, Integer> blockCounts();
 
     /** 按块 ID 取完整正文；索引块 ID（{@code ku_xxx#p2}）返回所属知识块。 */
     Optional<KnowledgeBlock> getBlock(String blockId);

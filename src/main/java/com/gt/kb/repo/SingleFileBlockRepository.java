@@ -6,6 +6,7 @@ import com.gt.config.ConfigKeys;
 import com.gt.kb.chunk.ChunkProfile;
 import com.gt.kb.chunk.Chunker;
 import com.gt.kb.chunk.DefaultChunker;
+import com.gt.kb.model.BlockSummary;
 import com.gt.kb.model.KnowledgeBlock;
 import com.gt.storage.NoteFileStorage;
 import org.apache.logging.log4j.LogManager;
@@ -66,6 +67,16 @@ public class SingleFileBlockRepository implements BlockRepository, AutoCloseable
                 ChunkProfile.forNote(note.noteType, note.layer));
         cache.put(noteKey, new Cached(body, blocks));
         return blocks;
+    }
+
+    @Override
+    public List<BlockSummary> listBlockSummaries(String noteKey) {
+        return catalog.listNote(noteKey);
+    }
+
+    @Override
+    public Map<String, Integer> blockCounts() {
+        return catalog.countByNote();
     }
 
     @Override

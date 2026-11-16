@@ -2,6 +2,7 @@ package com.gt.kb.repo;
 
 import com.gt.kb.model.BlockMeta;
 import com.gt.kb.model.BlockRef;
+import com.gt.kb.model.BlockSummary;
 import com.gt.kb.model.KnowledgeBlock;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,6 +15,7 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -162,6 +164,55 @@ public class BlockCatalogTest {
             assertTrue(rs.next());
             assertEquals("[\"My\\\"SQL\",\"a\\\\b\",\"线\\n程\"]", rs.getString(1));
         }
+    }
+
+    @Test
+    public void listNoteReturnsBlocksInLineOrderWithTitles() {
+        catalog.replaceNote("mysql", List.of(
+                block("ku_bbbbbbbb", "mysql", "慢查询", 20),
+                block("ku_aaaaaaaa", "mysql", "索引", 1)));
+
+        List<BlockSummary> rows = catalog.listNote("mysql");
+        assertEquals(List.of("ku_aaaaaaaa", "ku_bbbbbbbb"), rows.stream().map(BlockSummary::blockId).toList());
+        assertEquals("索引", rows.get(0).title());
+        assertEquals("mysql", rows.get(0).noteKey());
+        assertEquals(1, rows.get(0).level());
+        assertEquals(1, rows.get(0).startLine());
+        assertEquals(6, rows.get(0).endLine());
+    }
+
+    @Test
+    public void listNoteIsScopedToOneNote() {
+        catalog.replaceNote("mysql", List.of(block("ku_aaaaaaaa", "mysql", "索引", 1)));
+        catalog.replaceNote("redis", List.of(block("ku_cccccccc", "redis", "持久化", 1)));
+
+        assertEquals(List.of("ku_cccccccc"), catalog.listNote("redis").stream().map(BlockSummary::blockId).toList());
+        assertTrue(catalog.listNote("nosuch").isEmpty());
+    }
+
+    @Test
+    public void listNoteFollowsReplaceNote() {
+        catalog.replaceNote("mysql", List.of(
+                block("ku_aaaaaaaa", "mysql", "索引", 1),
+                block("ku_bbbbbbbb", "mysql", "慢查询", 10)));
+        catalog.replaceNote("mysql", List.of(block("ku_bbbbbbbb", "mysql", "慢查询", 3)));
+
+        List<BlockSummary> rows = catalog.listNote("mysql");
+        assertEquals(1, rows.size());
+        assertEquals(3, rows.get(0).startLine());
+    }
+
+    @Test
+    public void countByNoteCountsEveryNoteInOneQuery() {
+        assertTrue(catalog.countByNote().isEmpty());
+        catalog.replaceNote("mysql", List.of(
+                block("ku_aaaaaaaa", "mysql", "索引", 1),
+                block("ku_bbbbbbbb", "mysql", "慢查询", 10)));
+        catalog.replaceNote("redis", List.of(block("ku_cccccccc", "redis", "持久化", 1)));
+
+        assertEquals(Map.of("mysql", 2, "redis", 1), catalog.countByNote());
+        catalog.deleteNote("mysql");
+        assertEquals(Map.of("redis", 1), catalog.countByNote());
     }
 
     @Test
