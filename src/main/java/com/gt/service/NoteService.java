@@ -141,6 +141,47 @@ public class NoteService implements AutoCloseable {
     }
 
     /**
+     * 落盘一篇正文已在客户端加密的私密笔记（网页端端到端加密）。
+     *
+     * 与 {@link #save} 的区别只有两处：不补块 ID（密文切不出块），不再二次封装正文。
+     * 版本号、内容哈希、文件与索引写入、移出向量索引、清库内明文残留、刷新块目录，
+     * 全部与 save 走同一套口径。服务端拿不到 DEK，因此明文哈希由客户端算好传入，
+     * 否则同步会拿密文哈希与明文哈希比较，永远判定有变更。
+     *
+     * @param plaintextContentHash 明文正文的 MD5，与 {@code computeHash} 同口径
+     */
+    public BlockIdAssigner.Result saveSealed(NoteDto note, String plaintextContentHash) {
+        if (note == null || note.id == null) {
+            throw new IllegalArgumentException("笔记或笔记ID不能为空");
+        }
+        if (!note.encrypted) {
+            throw new IllegalArgumentException("saveSealed 只用于私密笔记");
+        }
+        if (note.bodyMd == null || note.bodyMd.isEmpty()) {
+            throw new IllegalArgumentException("密文正文为空，拒绝覆盖");
+        }
+
+        autoIncrementVersion(note);
+        note.contentHash = plaintextContentHash == null ? "" : plaintextContentHash;
+
+        fileStorage.saveToFile(note);
+        note.folderPath = fileStorage.getNoteFolderPath(note).toString();
+        repository.saveIndex(note);
+
+        VectorSearchManager.getInstance().removeNoteIndex(note.key);
+        repository.clearBodyMd(note.id);
+
+        try {
+            blockRepository.refreshNote(note.key);
+        } catch (RuntimeException e) {
+            logger.warn("[NoteService] 块目录刷新失败: {} - {}", note.key, e.getMessage());
+        }
+
+        logger.info("[NoteService] 已保存私密笔记(客户端加密): " + note.key + " (version=" + note.version + ")");
+        return new BlockIdAssigner.Result(note.bodyMd, 0, 0, List.of());
+    }
+
+    /**
      * 落盘前给无 ID 的知识块补 ID，并换掉重复/被别的笔记占用的 ID。
      *
      * 私密笔记跳过：正文马上要换成密文，ID 行写进去也切不出块。
@@ -348,6 +389,11 @@ public class NoteService implements AutoCloseable {
             
             // 移除向量索引
             VectorSearchManager.getInstance().removeNoteIndex(note.key);
+
+            // 清掉块目录残留，否则检索回源还能取到已删除笔记的正文
+            if (note.key != null && !note.key.isEmpty()) {
+                blockRepository.refreshNote(note.key);
+            }
         }
 
         logger.info("[NoteService] 已删除笔记: " + id);
@@ -368,6 +414,7 @@ public class NoteService implements AutoCloseable {
                 note.deleted = false;
                 note.updatedAt = System.currentTimeMillis();
                 fileStorage.saveToFile(note);
+                blockRepository.refreshNote(key);
             }
         }
 
@@ -396,6 +443,10 @@ public class NoteService implements AutoCloseable {
                 note.contentHash = computeHash(note.bodyMd);
                 note.folderPath = fileStorage.getNoteFolderPath(note).toString();
                 repository.saveIndex(note);
+                // 块目录也是派生数据：云同步下载后不刷新，树形目录与块跳转就会停在旧行号上
+                if (note.key != null && !note.key.isEmpty()) {
+                    blockRepository.refreshNote(note.key);
+                }
                 count++;
             } catch (Exception e) {
                 logger.error("[NoteService] 索引笔记失败: " + note.id + " - " + e.getMessage());

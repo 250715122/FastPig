@@ -89,3 +89,7 @@ docs/
 
 # 同步元数据备份
 *.bak
+
+# 网页端子工程：依赖与构建产物（前端源码在 web/src）
+web/node_modules/
+web/dist/

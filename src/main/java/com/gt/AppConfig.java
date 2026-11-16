@@ -58,6 +58,9 @@ public class AppConfig {
     // 也不能复用 setEncryptedPassword —— 那个只是 Base64 编码，可逆。
     public static final String MASTER_PASSWORD_SALT = "security.master.salt";
     public static final String MASTER_PASSWORD_VERIFIER = "security.master.verifier";
+
+    // 网页端登录口令。与主密码同理，只存 PBKDF2 校验值，不进设置页表单。
+    public static final String WEB_AUTH_PASSWORD_HASH = "web.auth.password.hash";
     
     // ===== 默认值 =====
 

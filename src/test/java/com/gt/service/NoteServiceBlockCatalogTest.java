@@ -102,4 +102,47 @@ public class NoteServiceBlockCatalogTest {
             assertEquals(Optional.of("mysql"), reopened.findNoteKey("ku_abcd2345"));
         }
     }
+
+    @Test
+    public void deleteClearsBlockCatalog() {
+        NoteDto n = note("mysql", "# 索引\n<!-- ku:abcd2345 -->\n\n正文一\n");
+        service.save(n);
+        assertEquals(Optional.of("mysql"), catalog.findNoteKey("ku_abcd2345"));
+
+        service.delete(n.id);
+
+        assertEquals(Optional.empty(), catalog.findNoteKey("ku_abcd2345"));
+        assertTrue(catalog.searchByTitlePrefix("mysql", "", 50).isEmpty());
+    }
+
+    @Test
+    public void restoreRepopulatesBlockCatalog() {
+        NoteDto n = note("mysql", "# 索引\n<!-- ku:abcd2345 -->\n\n正文一\n");
+        service.save(n);
+        service.delete(n.id);
+        assertTrue(catalog.searchByTitlePrefix("mysql", "", 50).isEmpty());
+
+        service.restore("mysql");
+
+        assertEquals(Optional.of("mysql"), catalog.findNoteKey("ku_abcd2345"));
+        assertEquals(1, catalog.searchByTitlePrefix("mysql", "sy", 10).size());
+    }
+
+    /** 云同步下载只改文件、不走 save，重建索引必须把块目录一起带上，否则树形目录停在旧行号。 */
+    @Test
+    public void rebuildIndexFromFilesRefreshesStaleCatalog() {
+        NoteDto n = note("mysql", "# 索引\n\n正文一\n");
+        service.save(n);
+        assertEquals(1, catalog.searchByTitlePrefix("mysql", "sy", 10).size());
+
+        NoteDto onDisk = storage.loadFromFile(storage.findNoteFolderByKey("mysql"));
+        onDisk.bodyMd = "# 慢查询\n\n正文二\n";
+        storage.saveToFile(onDisk);
+        assertEquals(1, catalog.searchByTitlePrefix("mysql", "sy", 10).size(), "前提：此刻目录还是旧的");
+
+        service.rebuildIndexFromFiles();
+
+        assertTrue(catalog.searchByTitlePrefix("mysql", "sy", 10).isEmpty());
+        assertEquals(1, catalog.searchByTitlePrefix("mysql", "mcx", 10).size());
+    }
 }

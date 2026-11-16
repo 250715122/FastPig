@@ -81,6 +81,14 @@ public enum ConfigKeys {
     KB_CHUNK_OVERLAP_CHARS("kb.chunk.overlap.chars", 100, 0, 1000, Category.KB, true, "索引块段间重叠字数"),
     KB_CHUNK_MIN_CHARS("kb.chunk.min.chars", 30, 0, 500, Category.KB, true, "无标题短块合并阈值"),
     KB_BLOCK_CACHE_MAX_NOTES("kb.block.cache.max.notes", 64, 1, 1000, Category.KB, false, "块缓存笔记数上限"),
+
+    // ===== 网页端 =====
+    WEB_ENABLED("web.enabled", false, null, null, Category.WEB, false, "启用网页端"),
+    WEB_BIND("web.bind", "0.0.0.0", null, null, Category.WEB, false, "监听地址（0.0.0.0=局域网可访问）"),
+    WEB_PORT("web.port", 8787, 1024, 65535, Category.WEB, false, "端口"),
+    WEB_SESSION_TTL("web.session.ttl", 720, 5, 10080, Category.WEB, false, "登录会话有效期（分钟）"),
+    // 默认关闭：桌面端与网页端同时上传会互相抢版本，需要谁同步由用户显式指定
+    WEB_SYNC_ENABLED("web.sync.enabled", false, null, null, Category.WEB, false, "网页端参与云同步"),
     ;
 
     /** 设置页分类。ABOUT 无配置项，仅用于导航。 */
@@ -93,6 +101,7 @@ public enum ConfigKeys {
         SEARCH("检索"),
         INDEX("索引"),
         KB("知识库"),
+        WEB("网页端"),
         ABOUT("关于");
 
         public final String label;

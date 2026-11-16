@@ -146,6 +146,13 @@
 		    <version>2.5.1</version>
 		</dependency>
 
+		<!-- 网页端 REST/SSE 的 JSON 编解码；HTTP 服务用 JDK 自带 HttpServer，不引入 Jetty -->
+		<dependency>
+			<groupId>com.google.code.gson</groupId>
+			<artifactId>gson</artifactId>
+			<version>2.11.0</version>
+		</dependency>
+
 	</dependencies>
 	
   <build>
